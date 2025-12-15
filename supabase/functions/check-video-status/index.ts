@@ -1,9 +1,72 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Generate JWT for service account authentication
+async function generateJWT(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: serviceAccount.client_email,
+    sub: serviceAccount.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/cloud-platform'
+  };
+
+  const encodedHeader = base64Encode(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const encodedPayload = base64Encode(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const signInput = `${encodedHeader}.${encodedPayload}`;
+
+  // Import private key and sign
+  const pemContent = serviceAccount.private_key
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\n/g, '');
+  
+  const binaryKey = Uint8Array.from(atob(pemContent), c => c.charCodeAt(0));
+  
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    binaryKey,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    new TextEncoder().encode(signInput)
+  );
+
+  const encodedSignature = base64Encode(signature).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${signInput}.${encodedSignature}`;
+}
+
+// Exchange JWT for access token
+async function getAccessToken(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
+  const jwt = await generateJWT(serviceAccount);
+  
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to get access token: ${error}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -11,11 +74,21 @@ serve(async (req) => {
   }
 
   try {
-    const VEO_API_KEY = Deno.env.get('Vertex_api');
+    const serviceAccountJson = Deno.env.get('VERTEX_SERVICE_ACCOUNT');
     
-    if (!VEO_API_KEY) {
+    if (!serviceAccountJson) {
       return new Response(
-        JSON.stringify({ error: 'VEO API key not configured' }),
+        JSON.stringify({ error: 'Vertex AI service account not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(serviceAccountJson);
+    } catch {
+      return new Response(
+        JSON.stringify({ error: 'Invalid service account JSON format' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -31,19 +104,26 @@ serve(async (req) => {
 
     console.log('Checking status for operation:', requestId);
 
-    // Use Gemini API operation status endpoint
-    const statusUrl = `https://generativelanguage.googleapis.com/v1beta/${requestId}?key=${VEO_API_KEY}`;
+    // Get OAuth2 access token
+    const accessToken = await getAccessToken(serviceAccount);
+
+    // Vertex AI operation status endpoint
+    // The requestId should be the full operation name like: projects/{project}/locations/{location}/operations/{operation}
+    const statusUrl = `https://us-central1-aiplatform.googleapis.com/v1/${requestId}`;
     
+    console.log('Fetching status from:', statusUrl);
+
     const response = await fetch(statusUrl, {
       method: 'GET',
       headers: {
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
     });
 
     const responseText = await response.text();
     console.log('Status response:', response.status);
-    console.log('Response body preview:', responseText.substring(0, 300));
+    console.log('Response body preview:', responseText.substring(0, 500));
 
     if (!response.ok) {
       console.error('Status check failed:', responseText);
@@ -80,16 +160,16 @@ serve(async (req) => {
         );
       }
 
-      // Extract video URL from response - handle different response structures
-      const result = data.response || data.result;
+      // Extract video URL from Vertex AI response
+      const result = data.response;
       let videoUrl = null;
 
-      // Try different paths for video URL
-      if (result?.generatedVideos && result.generatedVideos.length > 0) {
-        const video = result.generatedVideos[0];
-        videoUrl = video.video?.uri || video.uri || video.videoUri;
-      } else if (result?.videos && result.videos.length > 0) {
-        videoUrl = result.videos[0].uri || result.videos[0].url;
+      // Try different paths for video URL in Vertex AI response
+      if (result?.predictions && result.predictions.length > 0) {
+        const prediction = result.predictions[0];
+        videoUrl = prediction.videoUri || prediction.video?.uri || prediction.gcsUri;
+      } else if (result?.generatedVideos && result.generatedVideos.length > 0) {
+        videoUrl = result.generatedVideos[0].video?.uri;
       }
 
       console.log('Extracted video URL:', videoUrl);
@@ -104,11 +184,13 @@ serve(async (req) => {
       );
     }
 
-    // Still processing
+    // Still processing - check for progress metadata
+    const progress = data.metadata?.progressPercent || data.metadata?.progress || null;
+
     return new Response(
       JSON.stringify({
         status: 'processing',
-        progress: data.metadata?.progress || null
+        progress: progress
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
