@@ -117,21 +117,23 @@ serve(async (req) => {
       enhancedPrompt = `${prompt}. Maintain exact facial features and identity of the person in the reference image.`;
     }
 
-    // Vertex AI endpoint for Veo
+    // Vertex AI endpoint for Veo 3.1
     const projectId = serviceAccount.project_id;
     const location = 'us-central1';
-    const modelId = 'veo-001';
+    const modelId = 'veo-3.1-generate-001';
     const apiUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:predictLongRunning`;
 
-    // Build request body for Vertex AI
+    // Build request body for Vertex AI Veo 3.1
     const requestBody: Record<string, unknown> = {
       instances: [{
         prompt: enhancedPrompt
       }],
       parameters: {
         aspectRatio: aspectRatio || '16:9',
-        durationSeconds: duration || 5,
-        sampleCount: 1
+        sampleCount: 1,
+        personGeneration: 'allow_all',
+        addWatermark: true,
+        generateAudio: true
       }
     };
 
