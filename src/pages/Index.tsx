@@ -20,10 +20,10 @@ const Index = () => {
   const [error, setError] = useState<string | undefined>();
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  const pollStatus = useCallback(async (operationName: string) => {
+  const pollStatus = useCallback(async (requestId: string, modelId: string) => {
     try {
       const { data, error: fnError } = await supabase.functions.invoke('check-video-status', {
-        body: { operationName }
+        body: { requestId, modelId }
       });
 
       if (fnError) {
@@ -93,9 +93,10 @@ const Index = () => {
       toast.info('Video generation started! This may take a few minutes.');
 
       // Start polling for status
-      if (data.operationName) {
+      if (data.requestId) {
+        const modelId = referenceImage ? 'fal-ai/veo3.1' : 'fal-ai/veo3';
         pollingRef.current = setInterval(() => {
-          pollStatus(data.operationName);
+          pollStatus(data.requestId, modelId);
         }, 5000);
       }
     } catch (err) {
