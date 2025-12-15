@@ -20,7 +20,7 @@ serve(async (req) => {
       );
     }
 
-    const { requestId, modelId } = await req.json();
+    const { requestId } = await req.json();
 
     if (!requestId) {
       return new Response(
@@ -29,21 +29,20 @@ serve(async (req) => {
       );
     }
 
-    const model = modelId || 'fal-ai/veo3';
-    console.log('Checking status for request:', requestId, 'model:', model);
+    console.log('Checking status for operation:', requestId);
 
-    // Check status with Fal.ai
-    const statusUrl = `https://queue.fal.run/${model}/requests/${requestId}/status`;
+    // Use Google's operation status endpoint
+    const statusUrl = `https://generativelanguage.googleapis.com/v1beta/${requestId}?key=${VEO_API_KEY}`;
     
     const response = await fetch(statusUrl, {
       method: 'GET',
       headers: {
-        'Authorization': `Key ${VEO_API_KEY}`,
+        'Content-Type': 'application/json',
       },
     });
 
     const responseText = await response.text();
-    console.log('Status response:', response.status, responseText.substring(0, 500));
+    console.log('Status response:', response.status);
 
     if (!response.ok) {
       console.error('Status check failed:', responseText);
@@ -66,61 +65,44 @@ serve(async (req) => {
       );
     }
 
-    console.log('Request status:', data.status);
+    console.log('Operation done:', data.done, 'Has error:', !!data.error);
 
-    // Fal.ai statuses: IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED
-    if (data.status === 'COMPLETED') {
-      // Fetch the result
-      const resultUrl = `https://queue.fal.run/${model}/requests/${requestId}`;
-      const resultResponse = await fetch(resultUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Key ${VEO_API_KEY}`,
-        },
-      });
-
-      const resultText = await resultResponse.text();
-      console.log('Result response:', resultText.substring(0, 500));
-
-      let resultData;
-      try {
-        resultData = JSON.parse(resultText);
-      } catch {
+    // Check if operation is complete
+    if (data.done === true) {
+      if (data.error) {
         return new Response(
-          JSON.stringify({ status: 'failed', error: 'Failed to parse result' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ 
+            status: 'failed',
+            error: data.error.message || 'Video generation failed'
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      // Extract video URL from Fal.ai response
-      const videoUrl = resultData.video?.url || resultData.output?.video?.url;
-      
+      // Extract video URL from response
+      const result = data.response;
+      let videoUrl = null;
+
+      if (result?.generatedVideos && result.generatedVideos.length > 0) {
+        const video = result.generatedVideos[0];
+        videoUrl = video.video?.uri || video.uri;
+      }
+
       return new Response(
         JSON.stringify({
           status: 'completed',
           videos: videoUrl ? [{ uri: videoUrl }] : [],
-          data: resultData
+          videoUrl: videoUrl
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    if (data.status === 'FAILED') {
-      return new Response(
-        JSON.stringify({ 
-          status: 'failed',
-          error: data.error || 'Video generation failed'
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Still processing (IN_QUEUE or IN_PROGRESS)
+    // Still processing
     return new Response(
       JSON.stringify({
         status: 'processing',
-        queuePosition: data.queue_position,
-        logs: data.logs
+        progress: data.metadata?.progress || null
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

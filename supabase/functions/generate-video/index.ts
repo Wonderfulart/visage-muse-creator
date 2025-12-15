@@ -31,58 +31,68 @@ serve(async (req) => {
       aspectRatio
     });
 
-    // Use Fal.ai's Veo 3.1 API which supports simple API key auth
-    // Supports image-to-video with reference images
-    const modelId = referenceImage ? 'fal-ai/veo3.1' : 'fal-ai/veo3';
-    const falEndpoint = `https://queue.fal.run/${modelId}`;
+    // Use Google's Generative Language API for Veo
+    const modelId = 'veo-3.0-generate-001';
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predictLongRunning?key=${VEO_API_KEY}`;
     
-    // Build request body according to Fal.ai schema
+    // Build enhanced prompt
+    let enhancedPrompt = prompt;
+    if (preserveFace && referenceImage) {
+      enhancedPrompt = `${prompt}. Maintain exact facial features and identity of the person in the reference image.`;
+    }
+
+    // Build request body for Google's Veo API
     const requestBody: Record<string, unknown> = {
-      prompt: prompt,
-      aspect_ratio: aspectRatio || '16:9',
-      duration: `${duration || 8}s`,
-      enhance_prompt: true,
-      resolution: '720p',
-      generate_audio: true,
+      instances: [
+        {
+          prompt: enhancedPrompt
+        }
+      ],
+      parameters: {
+        aspectRatio: aspectRatio || '16:9',
+        durationSeconds: duration || 5,
+        numberOfVideos: 1
+      }
     };
 
     // Add reference image if provided
     if (referenceImage) {
-      // For Veo 3.1 with image input
-      requestBody.image_url = referenceImage; // Fal.ai accepts base64 data URIs
-      
-      // Add face preservation hint in prompt if enabled
-      if (preserveFace) {
-        requestBody.prompt = `${prompt}. Maintain exact facial features and identity of the person in the reference image.`;
-        requestBody.negative_prompt = 'distorted face, changed facial features, different person, morphed face';
+      const base64Match = referenceImage.match(/^data:image\/\w+;base64,(.+)$/);
+      if (base64Match) {
+        (requestBody.instances as any[])[0].image = {
+          bytesBase64Encoded: base64Match[1]
+        };
       }
     }
 
-    console.log('Sending request to Fal.ai:', falEndpoint);
+    console.log('Sending request to Google Veo API');
 
-    // Submit to Fal.ai queue
-    const response = await fetch(falEndpoint, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Key ${VEO_API_KEY}`,
       },
       body: JSON.stringify(requestBody),
     });
 
     const responseText = await response.text();
-    console.log('Fal.ai response status:', response.status);
-    console.log('Fal.ai response:', responseText.substring(0, 500));
+    console.log('Google Veo response status:', response.status);
 
     if (!response.ok) {
-      console.error('Fal.ai error:', responseText);
+      console.error('Google Veo error:', responseText);
       
       let errorMessage = 'Video generation failed';
-      let hint = 'Get your FAL API key from https://fal.ai/dashboard/keys';
+      let hint = 'Ensure your Google API key has access to the Generative Language API and Veo models';
       
       try {
         const errorData = JSON.parse(responseText);
-        errorMessage = errorData.detail || errorData.error || errorData.message || errorMessage;
+        errorMessage = errorData.error?.message || errorMessage;
+        
+        if (response.status === 403) {
+          hint = 'API access denied. Enable the Generative Language API in your Google Cloud Console and ensure Veo access.';
+        } else if (response.status === 400) {
+          hint = 'Invalid request. Try adjusting your prompt or settings.';
+        }
       } catch {
         errorMessage = responseText || errorMessage;
       }
@@ -104,14 +114,13 @@ serve(async (req) => {
       );
     }
 
-    console.log('Video generation queued, request_id:', data.request_id);
+    console.log('Video generation started, operation:', data.name);
 
     return new Response(
       JSON.stringify({
         success: true,
-        requestId: data.request_id,
-        statusUrl: data.status_url || `https://queue.fal.run/${modelId}/requests/${data.request_id}/status`,
-        data: data
+        requestId: data.name, // Operation name for status checking
+        modelId: modelId
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
