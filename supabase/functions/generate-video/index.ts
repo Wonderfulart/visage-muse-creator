@@ -6,7 +6,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -32,60 +31,64 @@ serve(async (req) => {
       aspectRatio
     });
 
-    // Build the request for Veo 3.1 API
-    // Veo 3.1 API endpoint for video generation
-    const veoEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/veo-3.1:generateVideos';
+    // Use Fal.ai's Veo 3.1 API which supports simple API key auth
+    // Supports image-to-video with reference images
+    const modelId = referenceImage ? 'fal-ai/veo3.1' : 'fal-ai/veo3';
+    const falEndpoint = `https://queue.fal.run/${modelId}`;
     
+    // Build request body according to Fal.ai schema
     const requestBody: Record<string, unknown> = {
       prompt: prompt,
-      config: {
-        duration: duration || 8,
-        aspectRatio: aspectRatio || '16:9',
-      }
+      aspect_ratio: aspectRatio || '16:9',
+      duration: `${duration || 8}s`,
+      enhance_prompt: true,
+      resolution: '720p',
+      generate_audio: true,
     };
 
-    // Add reference image with face preservation if provided
+    // Add reference image if provided
     if (referenceImage) {
-      // Extract base64 data from data URL if present
-      const base64Data = referenceImage.includes('base64,') 
-        ? referenceImage.split('base64,')[1] 
-        : referenceImage;
+      // For Veo 3.1 with image input
+      requestBody.image_url = referenceImage; // Fal.ai accepts base64 data URIs
       
-      requestBody.referenceImages = [{
-        image: {
-          bytesBase64Encoded: base64Data
-        },
-        config: {
-          referenceType: preserveFace ? 'REFERENCE_TYPE_SUBJECT' : 'REFERENCE_TYPE_STYLE',
-          // For face preservation, we use strict adherence
-          subjectConfig: preserveFace ? {
-            subjectType: 'SUBJECT_TYPE_PERSON',
-            adherenceLevel: 'ADHERENCE_LEVEL_STRICT'
-          } : undefined
-        }
-      }];
+      // Add face preservation hint in prompt if enabled
+      if (preserveFace) {
+        requestBody.prompt = `${prompt}. Maintain exact facial features and identity of the person in the reference image.`;
+        requestBody.negative_prompt = 'distorted face, changed facial features, different person, morphed face';
+      }
     }
 
-    console.log('Sending request to Veo API...');
+    console.log('Sending request to Fal.ai:', falEndpoint);
 
-    const response = await fetch(`${veoEndpoint}?key=${VEO_API_KEY}`, {
+    // Submit to Fal.ai queue
+    const response = await fetch(falEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Key ${VEO_API_KEY}`,
       },
       body: JSON.stringify(requestBody),
     });
 
     const responseText = await response.text();
-    console.log('Veo API response status:', response.status);
+    console.log('Fal.ai response status:', response.status);
+    console.log('Fal.ai response:', responseText.substring(0, 500));
 
     if (!response.ok) {
-      console.error('Veo API error:', responseText);
+      console.error('Fal.ai error:', responseText);
+      
+      let errorMessage = 'Video generation failed';
+      let hint = 'Get your FAL API key from https://fal.ai/dashboard/keys';
+      
+      try {
+        const errorData = JSON.parse(responseText);
+        errorMessage = errorData.detail || errorData.error || errorData.message || errorMessage;
+      } catch {
+        errorMessage = responseText || errorMessage;
+      }
+      
       return new Response(
-        JSON.stringify({ 
-          error: 'Video generation failed', 
-          details: responseText 
-        }),
+        JSON.stringify({ error: errorMessage, details: responseText, hint }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -94,20 +97,20 @@ serve(async (req) => {
     try {
       data = JSON.parse(responseText);
     } catch {
-      console.error('Failed to parse Veo response:', responseText);
+      console.error('Failed to parse response');
       return new Response(
-        JSON.stringify({ error: 'Invalid response from Veo API' }),
+        JSON.stringify({ error: 'Invalid response from API' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Video generation initiated successfully');
+    console.log('Video generation queued, request_id:', data.request_id);
 
-    // Return the operation name for polling or the video URL if immediately available
     return new Response(
       JSON.stringify({
         success: true,
-        operationName: data.name,
+        requestId: data.request_id,
+        statusUrl: data.status_url || `https://queue.fal.run/${modelId}/requests/${data.request_id}/status`,
         data: data
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -116,9 +119,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in generate-video function:', error);
     return new Response(
-      JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error occurred' 
-      }),
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
