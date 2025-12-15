@@ -31,7 +31,7 @@ serve(async (req) => {
 
     console.log('Checking status for operation:', requestId);
 
-    // Use Google's operation status endpoint
+    // Use Gemini API operation status endpoint
     const statusUrl = `https://generativelanguage.googleapis.com/v1beta/${requestId}?key=${VEO_API_KEY}`;
     
     const response = await fetch(statusUrl, {
@@ -43,6 +43,7 @@ serve(async (req) => {
 
     const responseText = await response.text();
     console.log('Status response:', response.status);
+    console.log('Response body preview:', responseText.substring(0, 300));
 
     if (!response.ok) {
       console.error('Status check failed:', responseText);
@@ -79,14 +80,19 @@ serve(async (req) => {
         );
       }
 
-      // Extract video URL from response
-      const result = data.response;
+      // Extract video URL from response - handle different response structures
+      const result = data.response || data.result;
       let videoUrl = null;
 
+      // Try different paths for video URL
       if (result?.generatedVideos && result.generatedVideos.length > 0) {
         const video = result.generatedVideos[0];
-        videoUrl = video.video?.uri || video.uri;
+        videoUrl = video.video?.uri || video.uri || video.videoUri;
+      } else if (result?.videos && result.videos.length > 0) {
+        videoUrl = result.videos[0].uri || result.videos[0].url;
       }
+
+      console.log('Extracted video URL:', videoUrl);
 
       return new Response(
         JSON.stringify({
