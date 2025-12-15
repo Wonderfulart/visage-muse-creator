@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const VEO_API_KEY = Deno.env.get('VEO_API_KEY');
+    const VEO_API_KEY = Deno.env.get('Vertex_api');
     
     if (!VEO_API_KEY) {
       return new Response(
