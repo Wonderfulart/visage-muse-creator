@@ -183,20 +183,38 @@ serve(async (req) => {
       const result = data.response;
       let videoUrl = null;
 
-      console.log('Response result:', JSON.stringify(result).substring(0, 500));
+      console.log('Response result keys:', result ? Object.keys(result) : 'null');
 
-      // Vertex AI Veo returns videos in result.videos array with gcsUri
+      // Vertex AI Veo returns videos in result.videos array
+      // It can return either gcsUri/uri OR bytesBase64Encoded
       if (result?.videos && result.videos.length > 0) {
         const video = result.videos[0];
-        videoUrl = video.gcsUri || video.uri;
+        
+        // Check for base64 encoded video data first (most common for Veo 3.1)
+        if (video.bytesBase64Encoded) {
+          console.log('Found base64 encoded video, converting to data URL');
+          videoUrl = `data:video/mp4;base64,${video.bytesBase64Encoded}`;
+        } else {
+          videoUrl = video.gcsUri || video.uri;
+        }
       } else if (result?.predictions && result.predictions.length > 0) {
         const prediction = result.predictions[0];
-        videoUrl = prediction.videoUri || prediction.video?.uri || prediction.gcsUri;
+        if (prediction.bytesBase64Encoded) {
+          videoUrl = `data:video/mp4;base64,${prediction.bytesBase64Encoded}`;
+        } else {
+          videoUrl = prediction.videoUri || prediction.video?.uri || prediction.gcsUri;
+        }
       } else if (result?.generatedVideos && result.generatedVideos.length > 0) {
-        videoUrl = result.generatedVideos[0].video?.uri;
+        const genVideo = result.generatedVideos[0];
+        if (genVideo.bytesBase64Encoded) {
+          videoUrl = `data:video/mp4;base64,${genVideo.bytesBase64Encoded}`;
+        } else {
+          videoUrl = genVideo.video?.uri;
+        }
       }
 
-      console.log('Extracted video URL:', videoUrl);
+      console.log('Extracted video URL type:', videoUrl?.startsWith('data:') ? 'base64 data URL' : 'external URL');
+      console.log('Video URL length:', videoUrl?.length || 0);
 
       return new Response(
         JSON.stringify({

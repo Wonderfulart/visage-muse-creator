@@ -14,7 +14,6 @@ const getAspectRatioClass = (ratio?: string) => {
   switch (ratio) {
     case '16:9': return 'aspect-video';
     case '9:16': return 'aspect-[9/16]';
-    case '1:1': return 'aspect-square';
     default: return 'aspect-video';
   }
 };
