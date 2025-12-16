@@ -1,6 +1,7 @@
 import { Video, Download, ExternalLink, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface GenerationStatusProps {
   status: 'idle' | 'processing' | 'completed' | 'failed';
@@ -27,6 +28,51 @@ const formatTime = (seconds: number) => {
 };
 
 export function GenerationStatus({ status, videoUrl, error, aspectRatio, className, progress = 0, elapsedTime = 0 }: GenerationStatusProps) {
+  const { toast } = useToast();
+
+  const handleDownload = async () => {
+    if (!videoUrl) return;
+
+    try {
+      // Handle base64 data URLs
+      if (videoUrl.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = videoUrl;
+        link.download = `music-video-${Date.now()}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast({ title: "Download started", description: "Your video is being downloaded" });
+        return;
+      }
+
+      // Handle remote URLs - fetch and create blob
+      const response = await fetch(videoUrl);
+      if (!response.ok) throw new Error('Failed to fetch video');
+      
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `music-video-${Date.now()}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up blob URL
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+      toast({ title: "Download started", description: "Your video is being downloaded" });
+    } catch (err) {
+      console.error('Download error:', err);
+      toast({ 
+        title: "Download failed", 
+        description: "Could not download the video. Try opening it in a new tab.",
+        variant: "destructive"
+      });
+    }
+  };
+
   if (status === 'idle') {
     return (
       <div className={cn(
@@ -144,11 +190,9 @@ export function GenerationStatus({ status, videoUrl, error, aspectRatio, classNa
               Open Full Screen
             </a>
           </Button>
-          <Button variant="hero" className="flex-1" asChild>
-            <a href={videoUrl} download="music-video.mp4">
-              <Download className="w-4 h-4" />
-              Download
-            </a>
+          <Button variant="hero" className="flex-1" onClick={handleDownload}>
+            <Download className="w-4 h-4" />
+            Download
           </Button>
         </div>
       )}
