@@ -95,7 +95,11 @@ serve(async (req) => {
       );
     }
 
-    const { prompt, referenceImage, preserveFace, duration, aspectRatio } = await req.json();
+    const { prompt, referenceImage, preserveFace, duration, aspectRatio: rawAspectRatio } = await req.json();
+
+    // Validate aspect ratio - Veo 3.1 only supports 16:9 and 9:16
+    const validAspectRatios = ['16:9', '9:16'];
+    const aspectRatio = validAspectRatios.includes(rawAspectRatio) ? rawAspectRatio : '16:9';
 
     console.log('Generating video with Vertex AI:', { 
       promptLength: prompt?.length, 
@@ -103,6 +107,7 @@ serve(async (req) => {
       preserveFace,
       duration,
       aspectRatio,
+      rawAspectRatio,
       projectId: serviceAccount.project_id
     });
 
