@@ -8,6 +8,7 @@ import { PromptInput } from '@/components/PromptInput';
 import { LyricsInput } from '@/components/LyricsInput';
 import { VideoSettings } from '@/components/VideoSettings';
 import { GenerationStatus } from '@/components/GenerationStatus';
+import { VideoGallery } from '@/components/VideoGallery';
 
 type GenerationStatusType = 'idle' | 'processing' | 'completed' | 'failed';
 
@@ -24,6 +25,7 @@ const Index = () => {
   const [error, setError] = useState<string | undefined>();
   const [progress, setProgress] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [galleryRefresh, setGalleryRefresh] = useState(0);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number | null>(null);
 
@@ -39,7 +41,14 @@ const Index = () => {
       }
 
       const { data, error: fnError } = await supabase.functions.invoke('check-video-status', {
-        body: { requestId, modelId }
+        body: { 
+          requestId, 
+          modelId,
+          prompt,
+          lyrics: lyrics || undefined,
+          duration,
+          aspectRatio
+        }
       });
 
       if (fnError) {
@@ -58,7 +67,8 @@ const Index = () => {
           setProgress(100);
           setVideoUrl(videoUri);
           setStatus('completed');
-          toast.success('Video generated successfully!');
+          setGalleryRefresh(prev => prev + 1); // Refresh gallery
+          toast.success('Video generated and saved!');
         } else {
           throw new Error('No video URL in response');
         }
@@ -80,7 +90,7 @@ const Index = () => {
       setError(err instanceof Error ? err.message : 'Failed to check status');
       setStatus('failed');
     }
-  }, []);
+  }, [prompt, lyrics, duration, aspectRatio]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) {
@@ -277,6 +287,11 @@ const Index = () => {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Video History Gallery */}
+          <div className="mt-12 animate-fade-in" style={{ animationDelay: '0.5s' }}>
+            <VideoGallery refreshTrigger={galleryRefresh} />
           </div>
         </div>
       </main>
