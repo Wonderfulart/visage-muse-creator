@@ -12,12 +12,11 @@ const getAspectRatioClass = (ratio?: string) => {
   switch (ratio) {
     case '16:9': return 'aspect-video';
     case '9:16': return 'aspect-[9/16]';
-    case '1:1': return 'aspect-square';
-    default: return 'aspect-square';
+    default: return 'aspect-video';
   }
 };
 
-export function ReferenceImageUpload({ onImageChange, aspectRatio = '1:1', className }: ReferenceImageUploadProps) {
+export function ReferenceImageUpload({ onImageChange, aspectRatio = '16:9', className }: ReferenceImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 

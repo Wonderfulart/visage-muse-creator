@@ -63,7 +63,7 @@ export function VideoSettings({
           <Monitor className="w-3.5 h-3.5" />
           Aspect Ratio
         </label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {aspectRatios.map((ratio) => (
             <button
               key={ratio.value}
