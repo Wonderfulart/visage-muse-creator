@@ -20,7 +20,7 @@ export function VideoSettings({
   onPreserveFaceChange,
   className
 }: VideoSettingsProps) {
-  const durations = [4, 6, 8];
+  const durations = [5, 6, 8];
   const aspectRatios = [
     { value: '16:9', label: 'Landscape' },
     { value: '9:16', label: 'Portrait' },

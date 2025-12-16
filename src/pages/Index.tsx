@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Clapperboard, Zap, Github } from 'lucide-react';
+import { Clapperboard, Zap, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { ReferenceImageUpload } from '@/components/ReferenceImageUpload';
@@ -168,8 +169,6 @@ const Index = () => {
                 <PromptInput
                   value={prompt}
                   onChange={setPrompt}
-                  onGenerate={handleGenerate}
-                  isGenerating={status === 'processing'}
                 />
               </div>
 
@@ -183,6 +182,26 @@ const Index = () => {
                   onPreserveFaceChange={setPreserveFace}
                 />
               </div>
+
+              <Button
+                onClick={handleGenerate}
+                disabled={!prompt.trim() || status === 'processing'}
+                variant="hero"
+                size="lg"
+                className="w-full"
+              >
+                {status === 'processing' ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    Generate Music Video
+                  </>
+                )}
+              </Button>
             </div>
 
             {/* Right Panel - Preview */}
