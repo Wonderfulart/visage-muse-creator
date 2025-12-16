@@ -141,8 +141,11 @@ serve(async (req) => {
     if (referenceImage) {
       const base64Match = referenceImage.match(/^data:image\/(\w+);base64,(.+)$/);
       if (base64Match) {
+        const mimeType = `image/${base64Match[1]}`;
+        console.log('Adding reference image with mime type:', mimeType);
         (requestBody.instances as Record<string, unknown>[])[0].image = {
-          bytesBase64Encoded: base64Match[2]
+          bytesBase64Encoded: base64Match[2],
+          mimeType: mimeType
         };
       }
     }
