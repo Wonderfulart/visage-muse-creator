@@ -19,10 +19,22 @@ const Index = () => {
   const [status, setStatus] = useState<GenerationStatusType>('idle');
   const [videoUrl, setVideoUrl] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [progress, setProgress] = useState(0);
+  const [elapsedTime, setElapsedTime] = useState(0);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<number | null>(null);
 
   const pollStatus = useCallback(async (requestId: string, modelId: string) => {
     try {
+      // Update elapsed time
+      if (startTimeRef.current) {
+        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        setElapsedTime(elapsed);
+        // Estimate progress based on elapsed time (assume ~60-90 seconds for video generation)
+        const estimatedProgress = Math.min(95, Math.floor((elapsed / 75) * 100));
+        setProgress(estimatedProgress);
+      }
+
       const { data, error: fnError } = await supabase.functions.invoke('check-video-status', {
         body: { requestId, modelId }
       });
@@ -37,9 +49,11 @@ const Index = () => {
           pollingRef.current = null;
         }
         
-        const video = data.videos?.[0];
-        if (video?.uri) {
-          setVideoUrl(video.uri);
+        // Check for video URL in multiple locations
+        const videoUri = data.videoUrl || data.videos?.[0]?.uri;
+        if (videoUri) {
+          setProgress(100);
+          setVideoUrl(videoUri);
           setStatus('completed');
           toast.success('Video generated successfully!');
         } else {
@@ -51,6 +65,9 @@ const Index = () => {
           pollingRef.current = null;
         }
         throw new Error(data.error || 'Video generation failed');
+      } else if (data.progress) {
+        // Use server-provided progress if available
+        setProgress(data.progress);
       }
     } catch (err) {
       if (pollingRef.current) {
@@ -71,6 +88,9 @@ const Index = () => {
     setStatus('processing');
     setError(undefined);
     setVideoUrl(undefined);
+    setProgress(0);
+    setElapsedTime(0);
+    startTimeRef.current = Date.now();
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('generate-video', {
@@ -221,6 +241,8 @@ const Index = () => {
                   videoUrl={videoUrl}
                   error={error}
                   aspectRatio={aspectRatio}
+                  progress={progress}
+                  elapsedTime={elapsedTime}
                 />
               </div>
             </div>

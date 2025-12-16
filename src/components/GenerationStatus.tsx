@@ -8,6 +8,8 @@ interface GenerationStatusProps {
   error?: string;
   aspectRatio?: string;
   className?: string;
+  progress?: number;
+  elapsedTime?: number;
 }
 
 const getAspectRatioClass = (ratio?: string) => {
@@ -18,7 +20,13 @@ const getAspectRatioClass = (ratio?: string) => {
   }
 };
 
-export function GenerationStatus({ status, videoUrl, error, aspectRatio, className }: GenerationStatusProps) {
+const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+export function GenerationStatus({ status, videoUrl, error, aspectRatio, className, progress = 0, elapsedTime = 0 }: GenerationStatusProps) {
   if (status === 'idle') {
     return (
       <div className={cn(
@@ -40,6 +48,9 @@ export function GenerationStatus({ status, videoUrl, error, aspectRatio, classNa
   }
 
   if (status === 'processing') {
+    const estimatedTotal = 75; // Estimated 75 seconds for generation
+    const remainingTime = Math.max(0, estimatedTotal - elapsedTime);
+    
     return (
       <div className={cn(
         "flex flex-col items-center justify-center p-8 bg-secondary/30 rounded-xl",
@@ -54,20 +65,31 @@ export function GenerationStatus({ status, videoUrl, error, aspectRatio, classNa
           </div>
           <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-pulse-ring" />
         </div>
+        
         <h3 className="text-lg font-heading font-semibold text-foreground mb-2">
           Generating Your Video
         </h3>
         <p className="text-sm text-muted-foreground text-center max-w-xs mb-4">
           Veo 3.1 is creating your music video with preserved facial features
         </p>
-        <div className="flex gap-1">
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="w-2 h-2 rounded-full bg-primary animate-bounce"
-              style={{ animationDelay: `${i * 0.2}s` }}
+
+        {/* Progress Bar */}
+        <div className="w-full max-w-xs space-y-2 mb-4">
+          <div className="h-2 bg-secondary rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-primary to-glow-secondary rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
             />
-          ))}
+          </div>
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>{progress}%</span>
+            <span>~{formatTime(remainingTime)} remaining</span>
+          </div>
+        </div>
+
+        {/* Elapsed time */}
+        <div className="text-xs text-muted-foreground">
+          Elapsed: {formatTime(elapsedTime)}
         </div>
       </div>
     );
