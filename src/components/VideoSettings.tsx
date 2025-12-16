@@ -24,7 +24,6 @@ export function VideoSettings({
   const aspectRatios = [
     { value: '16:9', label: 'Landscape' },
     { value: '9:16', label: 'Portrait' },
-    { value: '1:1', label: 'Square' },
   ];
 
   return (
