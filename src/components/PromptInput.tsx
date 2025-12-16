@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Wand2 } from 'lucide-react';
+import { Wand2, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 interface PromptInputProps {
   value: string;
@@ -10,6 +12,8 @@ interface PromptInputProps {
 
 export function PromptInput({ value, onChange, className }: PromptInputProps) {
   const [isFocused, setIsFocused] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const { toast } = useToast();
 
   const suggestions = [
     "Cinematic slow-mo walking through neon-lit streets",
@@ -18,12 +22,68 @@ export function PromptInput({ value, onChange, className }: PromptInputProps) {
     "Driving through a desert at golden hour",
   ];
 
+  const handleEnhancePrompt = async () => {
+    if (!value.trim()) {
+      toast({
+        title: "No prompt to enhance",
+        description: "Please enter a prompt first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsEnhancing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('enhance-prompt', {
+        body: { prompt: value },
+      });
+
+      if (error) throw error;
+
+      if (data?.enhancedPrompt) {
+        onChange(data.enhancedPrompt);
+        toast({
+          title: "Prompt enhanced",
+          description: "Your prompt has been improved with cinematic details",
+        });
+      }
+    } catch (error: any) {
+      console.error('Error enhancing prompt:', error);
+      toast({
+        title: "Enhancement failed",
+        description: error.message || "Failed to enhance prompt",
+        variant: "destructive",
+      });
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
   return (
     <div className={cn("space-y-4", className)}>
-      <label className="text-sm font-medium text-foreground flex items-center gap-2">
-        <Wand2 className="w-4 h-4 text-primary" />
-        Video Prompt
-      </label>
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-foreground flex items-center gap-2">
+          <Wand2 className="w-4 h-4 text-primary" />
+          Video Prompt
+        </label>
+        <button
+          onClick={handleEnhancePrompt}
+          disabled={isEnhancing || !value.trim()}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-all",
+            "bg-primary/10 text-primary border border-primary/20",
+            "hover:bg-primary/20 hover:border-primary/40",
+            "disabled:opacity-50 disabled:cursor-not-allowed"
+          )}
+        >
+          {isEnhancing ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="w-3.5 h-3.5" />
+          )}
+          {isEnhancing ? "Enhancing..." : "Enhance with AI"}
+        </button>
+      </div>
       
       <div className={cn(
         "relative rounded-xl transition-all duration-300",
