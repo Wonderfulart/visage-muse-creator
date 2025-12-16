@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.check-video-status]
 verify_jwt = false
+
+[functions.enhance-prompt]
+verify_jwt = false
