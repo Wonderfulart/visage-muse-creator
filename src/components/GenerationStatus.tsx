@@ -6,13 +6,27 @@ interface GenerationStatusProps {
   status: 'idle' | 'processing' | 'completed' | 'failed';
   videoUrl?: string;
   error?: string;
+  aspectRatio?: string;
   className?: string;
 }
 
-export function GenerationStatus({ status, videoUrl, error, className }: GenerationStatusProps) {
+const getAspectRatioClass = (ratio?: string) => {
+  switch (ratio) {
+    case '16:9': return 'aspect-video';
+    case '9:16': return 'aspect-[9/16]';
+    case '1:1': return 'aspect-square';
+    default: return 'aspect-video';
+  }
+};
+
+export function GenerationStatus({ status, videoUrl, error, aspectRatio, className }: GenerationStatusProps) {
   if (status === 'idle') {
     return (
-      <div className={cn("flex flex-col items-center justify-center h-full min-h-[300px] p-8", className)}>
+      <div className={cn(
+        "flex flex-col items-center justify-center p-8 bg-secondary/30 rounded-xl",
+        getAspectRatioClass(aspectRatio),
+        className
+      )}>
         <div className="p-6 rounded-full bg-secondary/50 mb-4">
           <Video className="w-12 h-12 text-muted-foreground" />
         </div>
@@ -28,7 +42,11 @@ export function GenerationStatus({ status, videoUrl, error, className }: Generat
 
   if (status === 'processing') {
     return (
-      <div className={cn("flex flex-col items-center justify-center h-full min-h-[300px] p-8", className)}>
+      <div className={cn(
+        "flex flex-col items-center justify-center p-8 bg-secondary/30 rounded-xl",
+        getAspectRatioClass(aspectRatio),
+        className
+      )}>
         <div className="relative mb-6">
           <div className="w-20 h-20 rounded-full bg-primary/20 animate-pulse-glow flex items-center justify-center">
             <div className="w-16 h-16 rounded-full bg-primary/30 animate-pulse flex items-center justify-center">
@@ -58,7 +76,11 @@ export function GenerationStatus({ status, videoUrl, error, className }: Generat
 
   if (status === 'failed') {
     return (
-      <div className={cn("flex flex-col items-center justify-center h-full min-h-[300px] p-8", className)}>
+      <div className={cn(
+        "flex flex-col items-center justify-center p-8 bg-secondary/30 rounded-xl",
+        getAspectRatioClass(aspectRatio),
+        className
+      )}>
         <div className="p-6 rounded-full bg-destructive/10 mb-4">
           <AlertCircle className="w-12 h-12 text-destructive" />
         </div>
@@ -73,13 +95,16 @@ export function GenerationStatus({ status, videoUrl, error, className }: Generat
   }
 
   return (
-    <div className={cn("flex flex-col h-full min-h-[300px]", className)}>
-      <div className="flex-1 relative rounded-xl overflow-hidden border border-border/50 glow-primary">
+    <div className={cn("flex flex-col", className)}>
+      <div className={cn(
+        "relative rounded-xl overflow-hidden border border-border/50 glow-primary",
+        getAspectRatioClass(aspectRatio)
+      )}>
         {videoUrl ? (
           <video
             src={videoUrl}
             controls
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain bg-black"
             autoPlay
             loop
           />
