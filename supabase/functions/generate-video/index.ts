@@ -130,6 +130,7 @@ serve(async (req) => {
       }],
       parameters: {
         aspectRatio: aspectRatio || '16:9',
+        durationSeconds: duration || 8,
         sampleCount: 1,
         personGeneration: 'allow_all',
         addWatermark: true,

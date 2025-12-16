@@ -1,17 +1,14 @@
 import { useState } from 'react';
-import { Sparkles, Wand2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Wand2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PromptInputProps {
   value: string;
   onChange: (value: string) => void;
-  onGenerate: () => void;
-  isGenerating: boolean;
   className?: string;
 }
 
-export function PromptInput({ value, onChange, onGenerate, isGenerating, className }: PromptInputProps) {
+export function PromptInput({ value, onChange, className }: PromptInputProps) {
   const [isFocused, setIsFocused] = useState(false);
 
   const suggestions = [
@@ -59,26 +56,6 @@ export function PromptInput({ value, onChange, onGenerate, isGenerating, classNa
           </button>
         ))}
       </div>
-
-      <Button
-        onClick={onGenerate}
-        disabled={!value.trim() || isGenerating}
-        variant="hero"
-        size="lg"
-        className="w-full"
-      >
-        {isGenerating ? (
-          <>
-            <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-            Generating...
-          </>
-        ) : (
-          <>
-            <Sparkles className="w-5 h-5" />
-            Generate Music Video
-          </>
-        )}
-      </Button>
     </div>
   );
 }
