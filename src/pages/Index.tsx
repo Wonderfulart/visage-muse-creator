@@ -159,7 +159,10 @@ const Index = () => {
             {/* Left Panel - Controls */}
             <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
               <div className="card-elevated rounded-2xl p-6">
-                <ReferenceImageUpload onImageChange={setReferenceImage} />
+                <ReferenceImageUpload 
+                  onImageChange={setReferenceImage}
+                  aspectRatio={aspectRatio}
+                />
               </div>
 
               <div className="card-elevated rounded-2xl p-6">
@@ -199,6 +202,7 @@ const Index = () => {
                   status={status}
                   videoUrl={videoUrl}
                   error={error}
+                  aspectRatio={aspectRatio}
                 />
               </div>
             </div>

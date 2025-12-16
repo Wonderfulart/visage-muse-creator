@@ -4,10 +4,20 @@ import { cn } from '@/lib/utils';
 
 interface ReferenceImageUploadProps {
   onImageChange: (image: string | null) => void;
+  aspectRatio?: string;
   className?: string;
 }
 
-export function ReferenceImageUpload({ onImageChange, className }: ReferenceImageUploadProps) {
+const getAspectRatioClass = (ratio?: string) => {
+  switch (ratio) {
+    case '16:9': return 'aspect-video';
+    case '9:16': return 'aspect-[9/16]';
+    case '1:1': return 'aspect-square';
+    default: return 'aspect-square';
+  }
+};
+
+export function ReferenceImageUpload({ onImageChange, aspectRatio = '1:1', className }: ReferenceImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -64,11 +74,14 @@ export function ReferenceImageUpload({ onImageChange, className }: ReferenceImag
       
       {preview ? (
         <div className="relative group animate-fade-in">
-          <div className="relative overflow-hidden rounded-xl border border-border/50 glow-sm">
+          <div className={cn(
+            "relative overflow-hidden rounded-xl border border-border/50 glow-sm",
+            getAspectRatioClass(aspectRatio)
+          )}>
             <img
               src={preview}
               alt="Reference"
-              className="w-full h-48 object-cover"
+              className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
@@ -85,7 +98,8 @@ export function ReferenceImageUpload({ onImageChange, className }: ReferenceImag
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           className={cn(
-            "flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-300",
+            "flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-300",
+            getAspectRatioClass(aspectRatio),
             isDragging
               ? "border-primary bg-primary/5 glow-sm"
               : "border-border/50 hover:border-primary/50 hover:bg-secondary/50"
