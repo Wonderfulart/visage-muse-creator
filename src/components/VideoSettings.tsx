@@ -1,13 +1,15 @@
-import { Settings, Clock, Monitor } from 'lucide-react';
+import { Settings, Clock, Monitor, Repeat } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface VideoSettingsProps {
   duration: number;
   aspectRatio: string;
   preserveFace: boolean;
+  sceneExtension: boolean;
   onDurationChange: (duration: number) => void;
   onAspectRatioChange: (ratio: string) => void;
   onPreserveFaceChange: (preserve: boolean) => void;
+  onSceneExtensionChange: (extend: boolean) => void;
   className?: string;
 }
 
@@ -15,9 +17,11 @@ export function VideoSettings({
   duration,
   aspectRatio,
   preserveFace,
+  sceneExtension,
   onDurationChange,
   onAspectRatioChange,
   onPreserveFaceChange,
+  onSceneExtensionChange,
   className
 }: VideoSettingsProps) {
   const durations = [5, 6, 8];
@@ -99,6 +103,31 @@ export function VideoSettings({
             className={cn(
               "absolute top-1 w-4 h-4 rounded-full bg-foreground transition-all",
               preserveFace ? "left-7" : "left-1"
+            )}
+          />
+        </button>
+      </div>
+
+      {/* Scene Extension Toggle */}
+      <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 border border-border/50">
+        <div className="flex items-start gap-3">
+          <Repeat className="w-4 h-4 text-primary mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Scene Extension</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Extend and loop the generated scene</p>
+          </div>
+        </div>
+        <button
+          onClick={() => onSceneExtensionChange(!sceneExtension)}
+          className={cn(
+            "relative w-12 h-6 rounded-full transition-all",
+            sceneExtension ? "bg-primary" : "bg-muted"
+          )}
+        >
+          <div
+            className={cn(
+              "absolute top-1 w-4 h-4 rounded-full bg-foreground transition-all",
+              sceneExtension ? "left-7" : "left-1"
             )}
           />
         </button>

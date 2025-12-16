@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { ReferenceImageUpload } from '@/components/ReferenceImageUpload';
 import { PromptInput } from '@/components/PromptInput';
+import { LyricsInput } from '@/components/LyricsInput';
 import { VideoSettings } from '@/components/VideoSettings';
 import { GenerationStatus } from '@/components/GenerationStatus';
 
@@ -13,9 +14,11 @@ type GenerationStatusType = 'idle' | 'processing' | 'completed' | 'failed';
 const Index = () => {
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [lyrics, setLyrics] = useState('');
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [preserveFace, setPreserveFace] = useState(true);
+  const [sceneExtension, setSceneExtension] = useState(false);
   const [status, setStatus] = useState<GenerationStatusType>('idle');
   const [videoUrl, setVideoUrl] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -96,8 +99,10 @@ const Index = () => {
       const { data, error: fnError } = await supabase.functions.invoke('generate-video', {
         body: {
           prompt,
+          lyrics: lyrics || undefined,
           referenceImage,
           preserveFace,
+          sceneExtension,
           duration,
           aspectRatio
         }
@@ -124,7 +129,7 @@ const Index = () => {
       setStatus('failed');
       toast.error(err instanceof Error ? err.message : 'Failed to generate video');
     }
-  }, [prompt, referenceImage, preserveFace, duration, aspectRatio, pollStatus]);
+  }, [prompt, lyrics, referenceImage, preserveFace, sceneExtension, duration, aspectRatio, pollStatus]);
 
   useEffect(() => {
     return () => {
@@ -190,6 +195,12 @@ const Index = () => {
                   value={prompt}
                   onChange={setPrompt}
                 />
+                <div className="mt-4 pt-4 border-t border-border/50">
+                  <LyricsInput
+                    value={lyrics}
+                    onChange={setLyrics}
+                  />
+                </div>
               </div>
 
               <div className="card-elevated rounded-2xl p-6">
@@ -197,9 +208,11 @@ const Index = () => {
                   duration={duration}
                   aspectRatio={aspectRatio}
                   preserveFace={preserveFace}
+                  sceneExtension={sceneExtension}
                   onDurationChange={setDuration}
                   onAspectRatioChange={setAspectRatio}
                   onPreserveFaceChange={setPreserveFace}
+                  onSceneExtensionChange={setSceneExtension}
                 />
               </div>
 
