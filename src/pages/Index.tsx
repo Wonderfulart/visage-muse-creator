@@ -92,11 +92,10 @@ const Index = () => {
 
       toast.info('Video generation started! This may take a few minutes.');
 
-      // Start polling for status
+      // Start polling for status - modelId is extracted from requestId in the edge function
       if (data.requestId) {
-        const modelId = referenceImage ? 'fal-ai/veo3.1' : 'fal-ai/veo3';
         pollingRef.current = setInterval(() => {
-          pollStatus(data.requestId, modelId);
+          pollStatus(data.requestId, data.modelId || 'veo-3.1-generate-001');
         }, 5000);
       }
     } catch (err) {

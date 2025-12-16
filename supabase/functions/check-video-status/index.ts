@@ -104,21 +104,40 @@ serve(async (req) => {
 
     console.log('Checking status for operation:', requestId);
 
+    // Parse operation name to extract components
+    // Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{opId}
+    const operationParts = requestId.match(
+      /projects\/([^\/]+)\/locations\/([^\/]+)\/publishers\/google\/models\/([^\/]+)\/operations\/([^\/]+)/
+    );
+
+    if (!operationParts) {
+      console.error('Invalid operation name format:', requestId);
+      return new Response(
+        JSON.stringify({ status: 'failed', error: 'Invalid operation name format' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const [, projectId, location, modelId] = operationParts;
+    console.log('Parsed operation:', { projectId, location, modelId });
+
     // Get OAuth2 access token
     const accessToken = await getAccessToken(serviceAccount);
 
-    // Vertex AI operation status endpoint
-    // The requestId should be the full operation name like: projects/{project}/locations/{location}/operations/{operation}
-    const statusUrl = `https://us-central1-aiplatform.googleapis.com/v1/${requestId}`;
+    // Build the correct fetchPredictOperation endpoint
+    const statusUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:fetchPredictOperation`;
     
     console.log('Fetching status from:', statusUrl);
 
     const response = await fetch(statusUrl, {
-      method: 'GET',
+      method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        operationName: requestId
+      })
     });
 
     const responseText = await response.text();
@@ -164,8 +183,13 @@ serve(async (req) => {
       const result = data.response;
       let videoUrl = null;
 
-      // Try different paths for video URL in Vertex AI response
-      if (result?.predictions && result.predictions.length > 0) {
+      console.log('Response result:', JSON.stringify(result).substring(0, 500));
+
+      // Vertex AI Veo returns videos in result.videos array with gcsUri
+      if (result?.videos && result.videos.length > 0) {
+        const video = result.videos[0];
+        videoUrl = video.gcsUri || video.uri;
+      } else if (result?.predictions && result.predictions.length > 0) {
         const prediction = result.predictions[0];
         videoUrl = prediction.videoUri || prediction.video?.uri || prediction.gcsUri;
       } else if (result?.generatedVideos && result.generatedVideos.length > 0) {
