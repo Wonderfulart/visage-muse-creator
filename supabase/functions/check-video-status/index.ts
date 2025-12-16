@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +24,6 @@ async function generateJWT(serviceAccount: { client_email: string; private_key: 
   const encodedPayload = base64Encode(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const signInput = `${encodedHeader}.${encodedPayload}`;
 
-  // Import private key and sign
   const pemContent = serviceAccount.private_key
     .replace('-----BEGIN PRIVATE KEY-----', '')
     .replace('-----END PRIVATE KEY-----', '')
@@ -68,6 +68,68 @@ async function getAccessToken(serviceAccount: { client_email: string; private_ke
   return data.access_token;
 }
 
+// Save video to storage and database
+async function saveVideoToStorage(
+  videoBase64: string,
+  prompt: string,
+  lyrics: string | undefined,
+  duration: number,
+  aspectRatio: string
+): Promise<string> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  // Decode base64 to binary
+  const base64Data = videoBase64.replace('data:video/mp4;base64,', '');
+  const binaryStr = atob(base64Data);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+
+  // Generate unique filename
+  const fileName = `video_${Date.now()}_${crypto.randomUUID()}.mp4`;
+  
+  console.log('Uploading video to storage:', fileName);
+
+  // Upload to storage
+  const { error: uploadError } = await supabase.storage
+    .from('videos')
+    .upload(fileName, bytes, {
+      contentType: 'video/mp4',
+      cacheControl: '3600'
+    });
+
+  if (uploadError) {
+    console.error('Storage upload error:', uploadError);
+    throw new Error(`Failed to upload video: ${uploadError.message}`);
+  }
+
+  // Get public URL
+  const { data: urlData } = supabase.storage.from('videos').getPublicUrl(fileName);
+  const videoUrl = urlData.publicUrl;
+
+  console.log('Video uploaded, URL:', videoUrl);
+
+  // Save to database
+  const { error: dbError } = await supabase.from('videos').insert({
+    prompt,
+    lyrics: lyrics || null,
+    video_url: videoUrl,
+    duration,
+    aspect_ratio: aspectRatio,
+    status: 'completed'
+  });
+
+  if (dbError) {
+    console.error('Database insert error:', dbError);
+    // Don't throw, video is still accessible
+  }
+
+  return videoUrl;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -93,7 +155,7 @@ serve(async (req) => {
       );
     }
 
-    const { requestId } = await req.json();
+    const { requestId, prompt, lyrics, duration, aspectRatio } = await req.json();
 
     if (!requestId) {
       return new Response(
@@ -104,8 +166,6 @@ serve(async (req) => {
 
     console.log('Checking status for operation:', requestId);
 
-    // Parse operation name to extract components
-    // Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{opId}
     const operationParts = requestId.match(
       /projects\/([^\/]+)\/locations\/([^\/]+)\/publishers\/google\/models\/([^\/]+)\/operations\/([^\/]+)/
     );
@@ -121,10 +181,8 @@ serve(async (req) => {
     const [, projectId, location, modelId] = operationParts;
     console.log('Parsed operation:', { projectId, location, modelId });
 
-    // Get OAuth2 access token
     const accessToken = await getAccessToken(serviceAccount);
 
-    // Build the correct fetchPredictOperation endpoint
     const statusUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:fetchPredictOperation`;
     
     console.log('Fetching status from:', statusUrl);
@@ -167,7 +225,6 @@ serve(async (req) => {
 
     console.log('Operation done:', data.done, 'Has error:', !!data.error);
 
-    // Check if operation is complete
     if (data.done === true) {
       if (data.error) {
         return new Response(
@@ -179,21 +236,19 @@ serve(async (req) => {
         );
       }
 
-      // Extract video URL from Vertex AI response
       const result = data.response;
       let videoUrl = null;
+      let isBase64 = false;
 
       console.log('Response result keys:', result ? Object.keys(result) : 'null');
 
-      // Vertex AI Veo returns videos in result.videos array
-      // It can return either gcsUri/uri OR bytesBase64Encoded
       if (result?.videos && result.videos.length > 0) {
         const video = result.videos[0];
         
-        // Check for base64 encoded video data first (most common for Veo 3.1)
         if (video.bytesBase64Encoded) {
-          console.log('Found base64 encoded video, converting to data URL');
+          console.log('Found base64 encoded video, will save to storage');
           videoUrl = `data:video/mp4;base64,${video.bytesBase64Encoded}`;
+          isBase64 = true;
         } else {
           videoUrl = video.gcsUri || video.uri;
         }
@@ -201,6 +256,7 @@ serve(async (req) => {
         const prediction = result.predictions[0];
         if (prediction.bytesBase64Encoded) {
           videoUrl = `data:video/mp4;base64,${prediction.bytesBase64Encoded}`;
+          isBase64 = true;
         } else {
           videoUrl = prediction.videoUri || prediction.video?.uri || prediction.gcsUri;
         }
@@ -208,13 +264,32 @@ serve(async (req) => {
         const genVideo = result.generatedVideos[0];
         if (genVideo.bytesBase64Encoded) {
           videoUrl = `data:video/mp4;base64,${genVideo.bytesBase64Encoded}`;
+          isBase64 = true;
         } else {
           videoUrl = genVideo.video?.uri;
         }
       }
 
-      console.log('Extracted video URL type:', videoUrl?.startsWith('data:') ? 'base64 data URL' : 'external URL');
-      console.log('Video URL length:', videoUrl?.length || 0);
+      // If we have a base64 video, save it to storage
+      if (videoUrl && isBase64) {
+        try {
+          console.log('Saving video to storage...');
+          const storedUrl = await saveVideoToStorage(
+            videoUrl,
+            prompt || 'Untitled video',
+            lyrics,
+            duration || 8,
+            aspectRatio || '16:9'
+          );
+          videoUrl = storedUrl;
+          console.log('Video saved to storage:', storedUrl);
+        } catch (saveError) {
+          console.error('Failed to save video to storage:', saveError);
+          // Continue with base64 URL if storage fails
+        }
+      }
+
+      console.log('Final video URL type:', videoUrl?.startsWith('data:') ? 'base64 data URL' : 'storage URL');
 
       return new Response(
         JSON.stringify({
@@ -226,7 +301,6 @@ serve(async (req) => {
       );
     }
 
-    // Still processing - check for progress metadata
     const progress = data.metadata?.progressPercent || data.metadata?.progress || null;
 
     return new Response(
