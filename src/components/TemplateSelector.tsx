@@ -1,4 +1,5 @@
 import { useState } from 'react';
+// Template selector component for video generation
 import { Badge } from '@/components/ui/badge';
 import { Sparkles, Film, Waves, Zap, Sun, Moon, Cloud, Flame } from 'lucide-react';
 
