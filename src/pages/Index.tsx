@@ -1,3 +1,4 @@
+// VeoStudio Pro - Main Generator Page
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music } from "lucide-react";
 import { Button } from "@/components/ui/button";
