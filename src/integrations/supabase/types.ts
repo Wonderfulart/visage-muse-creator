@@ -19,16 +19,31 @@ export type Database = {
           created_at: string
           email: string | null
           id: string
+          stripe_customer_id: string | null
+          subscription_end: string | null
+          subscription_tier: string | null
+          usage_reset_date: string | null
+          videos_generated_this_month: number | null
         }
         Insert: {
           created_at?: string
           email?: string | null
           id: string
+          stripe_customer_id?: string | null
+          subscription_end?: string | null
+          subscription_tier?: string | null
+          usage_reset_date?: string | null
+          videos_generated_this_month?: number | null
         }
         Update: {
           created_at?: string
           email?: string | null
           id?: string
+          stripe_customer_id?: string | null
+          subscription_end?: string | null
+          subscription_tier?: string | null
+          usage_reset_date?: string | null
+          videos_generated_this_month?: number | null
         }
         Relationships: []
       }
