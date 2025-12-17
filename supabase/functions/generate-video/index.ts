@@ -8,8 +8,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Face preservation prompts by consistency level
+const FACE_PROMPTS = {
+  strict: `CRITICAL: Maintain exact facial features from reference image throughout entire video. Preserve: bone structure, eye color and shape, nose shape, jawline, skin tone, facial proportions, eyebrow shape, lip shape. Face identity must remain 100% consistent in every frame. The person must be clearly recognizable as the same individual from start to finish.`,
+  moderate: `Maintain consistent facial features from reference image. Preserve key identifying characteristics: bone structure, eye shape, and overall facial proportions. Allow minor variations in lighting and angle while keeping the person recognizable.`,
+  loose: `Use reference image as inspiration for facial features. Maintain general resemblance while allowing creative interpretation and artistic flexibility.`
+};
+
+type FaceConsistencyLevel = 'strict' | 'moderate' | 'loose';
+
 // Input validation schemas
-function validateInput(data: unknown): { valid: true; data: { prompt: string; referenceImage?: string; preserveFace?: boolean; duration: number; aspectRatio: string; lyrics?: string } } | { valid: false; error: string } {
+function validateInput(data: unknown): { valid: true; data: { prompt: string; referenceImage?: string; preserveFace?: boolean; faceConsistencyLevel: FaceConsistencyLevel; duration: number; aspectRatio: string; lyrics?: string } } | { valid: false; error: string } {
   if (!data || typeof data !== 'object') {
     return { valid: false, error: 'Request body must be an object' };
   }
@@ -39,6 +48,12 @@ function validateInput(data: unknown): { valid: true; data: { prompt: string; re
     ? body.aspectRatio 
     : '16:9';
 
+  // Validate face consistency level
+  const validLevels: FaceConsistencyLevel[] = ['strict', 'moderate', 'loose'];
+  const faceConsistencyLevel = typeof body.faceConsistencyLevel === 'string' && validLevels.includes(body.faceConsistencyLevel as FaceConsistencyLevel)
+    ? body.faceConsistencyLevel as FaceConsistencyLevel
+    : 'strict';
+
   // Validate lyrics if provided
   if (body.lyrics !== undefined && body.lyrics !== null) {
     if (typeof body.lyrics !== 'string') {
@@ -55,6 +70,7 @@ function validateInput(data: unknown): { valid: true; data: { prompt: string; re
       prompt: body.prompt.trim(),
       referenceImage: typeof body.referenceImage === 'string' ? body.referenceImage : undefined,
       preserveFace: typeof body.preserveFace === 'boolean' ? body.preserveFace : true,
+      faceConsistencyLevel,
       duration,
       aspectRatio,
       lyrics: typeof body.lyrics === 'string' ? body.lyrics : undefined
@@ -189,12 +205,13 @@ serve(async (req) => {
       );
     }
 
-    const { prompt, referenceImage, preserveFace, duration, aspectRatio } = validation.data;
+    const { prompt, referenceImage, preserveFace, faceConsistencyLevel, duration, aspectRatio } = validation.data;
 
     console.log('Generating video with Vertex AI:', { 
       promptLength: prompt.length, 
       hasReferenceImage: !!referenceImage,
       preserveFace,
+      faceConsistencyLevel,
       duration,
       aspectRatio,
       userId: userInfo.userId,
@@ -206,10 +223,12 @@ serve(async (req) => {
     const accessToken = await getAccessToken(serviceAccount);
     console.log('Access token obtained successfully');
 
-    // Build enhanced prompt
+    // Build enhanced prompt with face preservation based on consistency level
     let enhancedPrompt = prompt;
     if (preserveFace && referenceImage) {
-      enhancedPrompt = `${prompt}. Maintain exact facial features and identity of the person in the reference image.`;
+      const facePrompt = FACE_PROMPTS[faceConsistencyLevel];
+      enhancedPrompt = `${prompt}. ${facePrompt}`;
+      console.log(`Applied ${faceConsistencyLevel} face preservation to prompt`);
     }
 
     // Vertex AI endpoint for Veo 3.1
