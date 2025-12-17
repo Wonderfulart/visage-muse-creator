@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Clapperboard, Zap, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Clapperboard, Zap, Sparkles, LogOut, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { ReferenceImageUpload } from '@/components/ReferenceImageUpload';
 import { PromptInput } from '@/components/PromptInput';
 import { LyricsInput } from '@/components/LyricsInput';
@@ -13,6 +15,9 @@ import { VideoGallery } from '@/components/VideoGallery';
 type GenerationStatusType = 'idle' | 'processing' | 'completed' | 'failed';
 
 const Index = () => {
+  const { user, loading, signOut } = useAuth();
+  const navigate = useNavigate();
+  
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [lyrics, setLyrics] = useState('');
@@ -28,6 +33,13 @@ const Index = () => {
   const [galleryRefresh, setGalleryRefresh] = useState(0);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number | null>(null);
+
+  // Redirect to auth if not logged in
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate('/auth');
+    }
+  }, [user, loading, navigate]);
 
   const pollStatus = useCallback(async (requestId: string, modelId: string) => {
     try {
@@ -149,6 +161,25 @@ const Index = () => {
     };
   }, []);
 
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success('Signed out successfully');
+  };
+
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (will redirect)
+  if (!user) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -168,6 +199,25 @@ const Index = () => {
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border/50">
               <Zap className="w-3.5 h-3.5 text-primary" />
               <span className="text-xs text-muted-foreground">API Connected</span>
+            </div>
+            
+            {/* User Menu */}
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border/50">
+                <User className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground truncate max-w-32">
+                  {user.email}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSignOut}
+                className="gap-1.5"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Sign out</span>
+              </Button>
             </div>
           </div>
         </div>

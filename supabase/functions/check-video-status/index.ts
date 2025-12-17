@@ -7,6 +7,53 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Input validation
+function validateInput(data: unknown): { valid: true; data: { requestId: string; prompt?: string; lyrics?: string; duration: number; aspectRatio: string } } | { valid: false; error: string } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'Request body must be an object' };
+  }
+
+  const body = data as Record<string, unknown>;
+
+  // Validate requestId
+  if (!body.requestId || typeof body.requestId !== 'string') {
+    return { valid: false, error: 'Request ID is required and must be a string' };
+  }
+  
+  // Validate requestId format
+  const operationPattern = /projects\/[^\/]+\/locations\/[^\/]+\/publishers\/google\/models\/[^\/]+\/operations\/[^\/]+/;
+  if (!operationPattern.test(body.requestId)) {
+    return { valid: false, error: 'Invalid operation name format' };
+  }
+
+  // Validate prompt if provided
+  if (body.prompt !== undefined && body.prompt !== null && typeof body.prompt !== 'string') {
+    return { valid: false, error: 'Prompt must be a string' };
+  }
+
+  // Validate lyrics if provided
+  if (body.lyrics !== undefined && body.lyrics !== null && typeof body.lyrics !== 'string') {
+    return { valid: false, error: 'Lyrics must be a string' };
+  }
+
+  const duration = typeof body.duration === 'number' ? body.duration : 8;
+  const validAspectRatios = ['16:9', '9:16'];
+  const aspectRatio = typeof body.aspectRatio === 'string' && validAspectRatios.includes(body.aspectRatio) 
+    ? body.aspectRatio 
+    : '16:9';
+
+  return {
+    valid: true,
+    data: {
+      requestId: body.requestId,
+      prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
+      lyrics: typeof body.lyrics === 'string' ? body.lyrics : undefined,
+      duration,
+      aspectRatio
+    }
+  };
+}
+
 // Generate JWT for service account authentication
 async function generateJWT(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -68,13 +115,31 @@ async function getAccessToken(serviceAccount: { client_email: string; private_ke
   return data.access_token;
 }
 
-// Save video to storage and database
+// Get user from JWT token
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
+
+// Save video to storage and database with user_id
 async function saveVideoToStorage(
   videoBase64: string,
   prompt: string,
   lyrics: string | undefined,
   duration: number,
-  aspectRatio: string
+  aspectRatio: string,
+  userId: string
 ): Promise<string> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -88,8 +153,8 @@ async function saveVideoToStorage(
     bytes[i] = binaryStr.charCodeAt(i);
   }
 
-  // Generate unique filename
-  const fileName = `video_${Date.now()}_${crypto.randomUUID()}.mp4`;
+  // Generate unique filename with user_id prefix for RLS
+  const fileName = `${userId}/video_${Date.now()}_${crypto.randomUUID()}.mp4`;
   
   console.log('Uploading video to storage:', fileName);
 
@@ -106,20 +171,28 @@ async function saveVideoToStorage(
     throw new Error(`Failed to upload video: ${uploadError.message}`);
   }
 
-  // Get public URL
-  const { data: urlData } = supabase.storage.from('videos').getPublicUrl(fileName);
-  const videoUrl = urlData.publicUrl;
+  // Generate signed URL (valid for 1 hour)
+  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+    .from('videos')
+    .createSignedUrl(fileName, 3600);
 
-  console.log('Video uploaded, URL:', videoUrl);
+  if (signedUrlError || !signedUrlData) {
+    console.error('Failed to create signed URL:', signedUrlError);
+    throw new Error('Failed to create signed URL');
+  }
 
-  // Save to database
+  const videoUrl = signedUrlData.signedUrl;
+  console.log('Video uploaded, signed URL created');
+
+  // Save to database with user_id
   const { error: dbError } = await supabase.from('videos').insert({
     prompt,
     lyrics: lyrics || null,
-    video_url: videoUrl,
+    video_url: fileName, // Store the path, not the signed URL
     duration,
     aspect_ratio: aspectRatio,
-    status: 'completed'
+    status: 'completed',
+    user_id: userId
   });
 
   if (dbError) {
@@ -136,6 +209,17 @@ serve(async (req) => {
   }
 
   try {
+    // Verify user authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Authenticated user:', userInfo.userId);
+
     const serviceAccountJson = Deno.env.get('VERTEX_SERVICE_ACCOUNT');
     
     if (!serviceAccountJson) {
@@ -155,14 +239,18 @@ serve(async (req) => {
       );
     }
 
-    const { requestId, prompt, lyrics, duration, aspectRatio } = await req.json();
-
-    if (!requestId) {
+    // Validate input
+    const rawBody = await req.json();
+    const validation = validateInput(rawBody);
+    
+    if (!validation.valid) {
       return new Response(
-        JSON.stringify({ error: 'Request ID is required' }),
+        JSON.stringify({ error: validation.error }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const { requestId, prompt, lyrics, duration, aspectRatio } = validation.data;
 
     console.log('Checking status for operation:', requestId);
 
@@ -270,26 +358,27 @@ serve(async (req) => {
         }
       }
 
-      // If we have a base64 video, save it to storage
+      // If we have a base64 video, save it to storage with user_id
       if (videoUrl && isBase64) {
         try {
-          console.log('Saving video to storage...');
+          console.log('Saving video to storage for user:', userInfo.userId);
           const storedUrl = await saveVideoToStorage(
             videoUrl,
             prompt || 'Untitled video',
             lyrics,
-            duration || 8,
-            aspectRatio || '16:9'
+            duration,
+            aspectRatio,
+            userInfo.userId
           );
           videoUrl = storedUrl;
-          console.log('Video saved to storage:', storedUrl);
+          console.log('Video saved to storage with signed URL');
         } catch (saveError) {
           console.error('Failed to save video to storage:', saveError);
           // Continue with base64 URL if storage fails
         }
       }
 
-      console.log('Final video URL type:', videoUrl?.startsWith('data:') ? 'base64 data URL' : 'storage URL');
+      console.log('Final video URL type:', videoUrl?.startsWith('data:') ? 'base64 data URL' : 'signed URL');
 
       return new Response(
         JSON.stringify({

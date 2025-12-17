@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Film, Trash2, Download, Play, Clock, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -12,6 +12,7 @@ interface Video {
   duration: number;
   aspect_ratio: string;
   created_at: string;
+  signedUrl?: string;
 }
 
 interface VideoGalleryProps {
@@ -23,7 +24,30 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
 
-  const fetchVideos = async () => {
+  const getSignedUrl = useCallback(async (videoPath: string): Promise<string | null> => {
+    try {
+      // If it's already a full URL (legacy data), return it
+      if (videoPath.startsWith('http')) {
+        return videoPath;
+      }
+      
+      const { data, error } = await supabase.storage
+        .from('videos')
+        .createSignedUrl(videoPath, 3600); // 1 hour expiry
+      
+      if (error) {
+        console.error('Error creating signed URL:', error);
+        return null;
+      }
+      
+      return data.signedUrl;
+    } catch (err) {
+      console.error('Error getting signed URL:', err);
+      return null;
+    }
+  }, []);
+
+  const fetchVideos = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('videos')
@@ -31,28 +55,42 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setVideos(data || []);
+      
+      // Get signed URLs for all videos
+      const videosWithUrls = await Promise.all(
+        (data || []).map(async (video) => {
+          const signedUrl = await getSignedUrl(video.video_url);
+          return { ...video, signedUrl: signedUrl || video.video_url };
+        })
+      );
+      
+      setVideos(videosWithUrls);
     } catch (err) {
       console.error('Error fetching videos:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [getSignedUrl]);
 
   useEffect(() => {
     fetchVideos();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, fetchVideos]);
 
   const handleDelete = async (id: string, videoUrl: string) => {
     try {
-      // Extract filename from URL
-      const urlParts = videoUrl.split('/');
-      const fileName = urlParts[urlParts.length - 1];
+      // Determine the storage path (video_url now stores the path)
+      let storagePath = videoUrl;
+      
+      // If it's a full URL (legacy), extract the filename
+      if (videoUrl.startsWith('http')) {
+        const urlParts = videoUrl.split('/');
+        storagePath = urlParts[urlParts.length - 1];
+      }
 
       // Delete from storage
       const { error: storageError } = await supabase.storage
         .from('videos')
-        .remove([fileName]);
+        .remove([storagePath]);
 
       if (storageError) {
         console.error('Storage delete error:', storageError);
@@ -74,9 +112,9 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
     }
   };
 
-  const handleDownload = async (videoUrl: string, prompt: string) => {
+  const handleDownload = async (signedUrl: string, prompt: string) => {
     try {
-      const response = await fetch(videoUrl);
+      const response = await fetch(signedUrl);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       
@@ -136,7 +174,7 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
       <div className="flex items-center justify-between">
         <h3 className="font-heading text-2xl font-bold text-foreground flex items-center gap-2">
           <Film className="w-6 h-6 text-primary" />
-          Video History
+          Your Videos
         </h3>
         <span className="text-sm text-muted-foreground">{videos.length} video{videos.length !== 1 ? 's' : ''}</span>
       </div>
@@ -150,7 +188,7 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
             {/* Video Preview */}
             <div className="relative aspect-video bg-muted">
               <video
-                src={video.video_url}
+                src={video.signedUrl}
                 className="w-full h-full object-cover"
                 controls={playingId === video.id}
                 onPlay={() => setPlayingId(video.id)}
@@ -161,7 +199,7 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
                 <div 
                   className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer transition-opacity group-hover:bg-black/40"
                   onClick={() => {
-                    const videoEl = document.querySelector(`video[src="${video.video_url}"]`) as HTMLVideoElement;
+                    const videoEl = document.querySelector(`video[src="${video.signedUrl}"]`) as HTMLVideoElement;
                     if (videoEl) {
                       videoEl.play();
                     }
@@ -197,7 +235,7 @@ export const VideoGallery = ({ refreshTrigger }: VideoGalleryProps) => {
                   variant="ghost"
                   size="sm"
                   className="flex-1"
-                  onClick={() => handleDownload(video.video_url, video.prompt)}
+                  onClick={() => handleDownload(video.signedUrl || video.video_url, video.prompt)}
                 >
                   <Download className="w-4 h-4 mr-1" />
                   Download

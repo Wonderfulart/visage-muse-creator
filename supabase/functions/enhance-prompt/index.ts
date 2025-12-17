@@ -1,9 +1,54 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Input validation
+function validateInput(data: unknown): { valid: true; data: { prompt: string } } | { valid: false; error: string } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'Request body must be an object' };
+  }
+
+  const body = data as Record<string, unknown>;
+
+  // Validate prompt
+  if (!body.prompt || typeof body.prompt !== 'string') {
+    return { valid: false, error: 'Prompt is required and must be a string' };
+  }
+  if (body.prompt.length > 2000) {
+    return { valid: false, error: 'Prompt must be less than 2000 characters' };
+  }
+  if (body.prompt.trim().length === 0) {
+    return { valid: false, error: 'Prompt cannot be empty' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      prompt: body.prompt.trim()
+    }
+  };
+}
+
+// Get user from JWT token
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -11,21 +56,36 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt } = await req.json();
-    
-    if (!prompt || typeof prompt !== 'string') {
+    // Verify user authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
       return new Response(
-        JSON.stringify({ error: 'Prompt is required' }),
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Authenticated user:', userInfo.userId);
+
+    // Validate input
+    const rawBody = await req.json();
+    const validation = validateInput(rawBody);
+    
+    if (!validation.valid) {
+      return new Response(
+        JSON.stringify({ error: validation.error }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const { prompt } = validation.data;
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    console.log('Enhancing prompt:', prompt.substring(0, 50) + '...');
+    console.log('Enhancing prompt for user:', userInfo.userId);
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
