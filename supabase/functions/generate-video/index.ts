@@ -296,6 +296,10 @@ serve(async (req) => {
     const apiUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:predictLongRunning`;
 
     // Build request body for Vertex AI Veo 3.1
+    // Free tier gets watermark, paid tiers don't
+    const shouldAddWatermark = tier === 'free';
+    console.log(`Watermark for tier ${tier}: ${shouldAddWatermark}`);
+    
     const requestBody: Record<string, unknown> = {
       instances: [{
         prompt: enhancedPrompt
@@ -305,7 +309,7 @@ serve(async (req) => {
         durationSeconds: duration,
         sampleCount: 1,
         personGeneration: 'allow_all',
-        addWatermark: true,
+        addWatermark: shouldAddWatermark,
         generateAudio: true
       }
     };

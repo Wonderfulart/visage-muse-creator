@@ -100,7 +100,8 @@ async function generateSingleVideo(
   projectId: string,
   aspectRatio: string,
   referenceImage?: string,
-  preserveFace?: boolean
+  preserveFace?: boolean,
+  addWatermark: boolean = true
 ): Promise<{ success: boolean; requestId?: string; error?: string; order: number }> {
   try {
     const location = 'us-central1';
@@ -121,7 +122,7 @@ async function generateSingleVideo(
         durationSeconds: Math.min(Math.max(scene.duration, 5), 8),
         sampleCount: 1,
         personGeneration: 'allow_all',
-        addWatermark: true,
+        addWatermark: addWatermark,
         generateAudio: true
       }
     };
@@ -236,6 +237,21 @@ serve(async (req) => {
       }
     }
 
+    // Check subscription tier for watermark
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('subscription_tier')
+      .eq('id', userInfo.userId)
+      .single();
+
+    const tier = profile?.subscription_tier || 'free';
+    const shouldAddWatermark = tier === 'free';
+    console.log(`Batch generation for tier ${tier}, watermark: ${shouldAddWatermark}`);
+
     console.log(`Starting batch generation of ${scenes.length} scenes`);
 
     // Get OAuth2 access token
@@ -251,7 +267,8 @@ serve(async (req) => {
           serviceAccount.project_id,
           aspectRatio || '16:9',
           referenceImage,
-          preserveFace
+          preserveFace,
+          shouldAddWatermark
         )
       )
     );
