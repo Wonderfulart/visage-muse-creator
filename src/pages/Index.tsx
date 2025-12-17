@@ -1,6 +1,6 @@
 // VeoStudio Pro - Main Generator Page
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown } from "lucide-react";
+import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown, Scissors, Volume2, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -17,12 +17,14 @@ import { BatchGenerationPanel } from "@/components/BatchGenerationPanel";
 import { CoverArtGenerator } from "@/components/CoverArtGenerator";
 import { SafetyAnalyzer } from "@/components/SafetyAnalyzer";
 import { LyricsToVideoSync } from "@/components/LyricsToVideoSync";
+import { StitchVideos } from "@/components/StitchVideos";
+import { AudioEditor } from "@/components/AudioEditor";
 import { AuthButton } from "@/components/AuthButton";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useNavigate } from "react-router-dom";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
-type GenerationMode = "single" | "batch" | "lyrics-sync";
+type GenerationMode = "single" | "batch" | "lyrics-sync" | "stitch" | "audio";
 type FaceConsistencyLevel = "strict" | "moderate" | "loose";
 
 const Index = () => {
@@ -320,21 +322,26 @@ const Index = () => {
 
           {/* Generation Mode Tabs */}
           <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as GenerationMode)} className="mb-8">
-            <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid">
+            <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
               <TabsTrigger value="single" className="gap-2">
                 <Sparkles className="w-4 h-4" />
-                <span className="hidden sm:inline">Quick Generate</span>
-                <span className="sm:hidden">Quick</span>
+                <span className="hidden sm:inline">Quick</span>
               </TabsTrigger>
               <TabsTrigger value="batch" className="gap-2">
                 <Layers className="w-4 h-4" />
-                <span className="hidden sm:inline">Batch Scenes</span>
-                <span className="sm:hidden">Batch</span>
+                <span className="hidden sm:inline">Batch</span>
               </TabsTrigger>
               <TabsTrigger value="lyrics-sync" className="gap-2">
                 <Music className="w-4 h-4" />
-                <span className="hidden sm:inline">Lyrics Sync</span>
-                <span className="sm:hidden">Lyrics</span>
+                <span className="hidden sm:inline">Lyrics</span>
+              </TabsTrigger>
+              <TabsTrigger value="stitch" className="gap-2">
+                <Scissors className="w-4 h-4" />
+                <span className="hidden sm:inline">Stitch</span>
+              </TabsTrigger>
+              <TabsTrigger value="audio" className="gap-2">
+                <Volume2 className="w-4 h-4" />
+                <span className="hidden sm:inline">Audio</span>
               </TabsTrigger>
             </TabsList>
 

@@ -47,6 +47,51 @@ export type Database = {
         }
         Relationships: []
       }
+      stitched_videos: {
+        Row: {
+          background_music_url: string | null
+          created_at: string
+          duration_seconds: number | null
+          id: string
+          output_quality: string
+          output_url: string | null
+          source_video_ids: string[]
+          status: string
+          text_overlays: Json | null
+          title: string | null
+          transition_type: string
+          user_id: string
+        }
+        Insert: {
+          background_music_url?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          output_quality?: string
+          output_url?: string | null
+          source_video_ids?: string[]
+          status?: string
+          text_overlays?: Json | null
+          title?: string | null
+          transition_type?: string
+          user_id: string
+        }
+        Update: {
+          background_music_url?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          output_quality?: string
+          output_url?: string | null
+          source_video_ids?: string[]
+          status?: string
+          text_overlays?: Json | null
+          title?: string | null
+          transition_type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       videos: {
         Row: {
           aspect_ratio: string
