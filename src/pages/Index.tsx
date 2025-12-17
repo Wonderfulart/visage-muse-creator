@@ -203,12 +203,15 @@ const Index = () => {
             
             {/* User Menu */}
             <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border/50">
-                <User className="w-3.5 h-3.5 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground truncate max-w-32">
-                  {user.email}
-                </span>
-              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/profile')}
+                className="gap-1.5"
+              >
+                <User className="w-4 h-4" />
+                <span className="hidden sm:inline truncate max-w-32">{user.email}</span>
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
