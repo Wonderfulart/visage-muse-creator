@@ -1,10 +1,65 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Input validation schemas
+function validateInput(data: unknown): { valid: true; data: { prompt: string; referenceImage?: string; preserveFace?: boolean; duration: number; aspectRatio: string; lyrics?: string } } | { valid: false; error: string } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'Request body must be an object' };
+  }
+
+  const body = data as Record<string, unknown>;
+
+  // Validate prompt
+  if (!body.prompt || typeof body.prompt !== 'string') {
+    return { valid: false, error: 'Prompt is required and must be a string' };
+  }
+  if (body.prompt.length > 2000) {
+    return { valid: false, error: 'Prompt must be less than 2000 characters' };
+  }
+  if (body.prompt.trim().length === 0) {
+    return { valid: false, error: 'Prompt cannot be empty' };
+  }
+
+  // Validate duration
+  const duration = typeof body.duration === 'number' ? body.duration : 8;
+  if (duration < 5 || duration > 8) {
+    return { valid: false, error: 'Duration must be between 5 and 8 seconds' };
+  }
+
+  // Validate aspect ratio
+  const validAspectRatios = ['16:9', '9:16'];
+  const aspectRatio = typeof body.aspectRatio === 'string' && validAspectRatios.includes(body.aspectRatio) 
+    ? body.aspectRatio 
+    : '16:9';
+
+  // Validate lyrics if provided
+  if (body.lyrics !== undefined && body.lyrics !== null) {
+    if (typeof body.lyrics !== 'string') {
+      return { valid: false, error: 'Lyrics must be a string' };
+    }
+    if (body.lyrics.length > 5000) {
+      return { valid: false, error: 'Lyrics must be less than 5000 characters' };
+    }
+  }
+
+  return {
+    valid: true,
+    data: {
+      prompt: body.prompt.trim(),
+      referenceImage: typeof body.referenceImage === 'string' ? body.referenceImage : undefined,
+      preserveFace: typeof body.preserveFace === 'boolean' ? body.preserveFace : true,
+      duration,
+      aspectRatio,
+      lyrics: typeof body.lyrics === 'string' ? body.lyrics : undefined
+    }
+  };
+}
 
 // Generate JWT for service account authentication
 async function generateJWT(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
@@ -23,7 +78,6 @@ async function generateJWT(serviceAccount: { client_email: string; private_key: 
   const encodedPayload = base64Encode(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const signInput = `${encodedHeader}.${encodedPayload}`;
 
-  // Import private key and sign
   const pemContent = serviceAccount.private_key
     .replace('-----BEGIN PRIVATE KEY-----', '')
     .replace('-----END PRIVATE KEY-----', '')
@@ -68,12 +122,40 @@ async function getAccessToken(serviceAccount: { client_email: string; private_ke
   return data.access_token;
 }
 
+// Get user from JWT token
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Verify user authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Authenticated user:', userInfo.userId);
+
     const serviceAccountJson = Deno.env.get('VERTEX_SERVICE_ACCOUNT');
     
     if (!serviceAccountJson) {
@@ -95,19 +177,26 @@ serve(async (req) => {
       );
     }
 
-    const { prompt, referenceImage, preserveFace, duration, aspectRatio: rawAspectRatio } = await req.json();
+    // Validate input
+    const rawBody = await req.json();
+    const validation = validateInput(rawBody);
+    
+    if (!validation.valid) {
+      return new Response(
+        JSON.stringify({ error: validation.error }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    // Validate aspect ratio - Veo 3.1 only supports 16:9 and 9:16
-    const validAspectRatios = ['16:9', '9:16'];
-    const aspectRatio = validAspectRatios.includes(rawAspectRatio) ? rawAspectRatio : '16:9';
+    const { prompt, referenceImage, preserveFace, duration, aspectRatio } = validation.data;
 
     console.log('Generating video with Vertex AI:', { 
-      promptLength: prompt?.length, 
+      promptLength: prompt.length, 
       hasReferenceImage: !!referenceImage,
       preserveFace,
       duration,
       aspectRatio,
-      rawAspectRatio,
+      userId: userInfo.userId,
       projectId: serviceAccount.project_id
     });
 
@@ -134,8 +223,8 @@ serve(async (req) => {
         prompt: enhancedPrompt
       }],
       parameters: {
-        aspectRatio: aspectRatio || '16:9',
-        durationSeconds: duration || 8,
+        aspectRatio: aspectRatio,
+        durationSeconds: duration,
         sampleCount: 1,
         personGeneration: 'allow_all',
         addWatermark: true,
@@ -215,7 +304,8 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         requestId: operationName,
-        modelId: modelId
+        modelId: modelId,
+        userId: userInfo.userId
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
