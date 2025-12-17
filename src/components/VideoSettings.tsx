@@ -1,27 +1,39 @@
 import { Settings, Clock, Monitor, Repeat } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+type FaceConsistencyLevel = 'strict' | 'moderate' | 'loose';
+
 interface VideoSettingsProps {
   duration: number;
   aspectRatio: string;
   preserveFace: boolean;
   sceneExtension: boolean;
+  faceConsistencyLevel: FaceConsistencyLevel;
   onDurationChange: (duration: number) => void;
   onAspectRatioChange: (ratio: string) => void;
   onPreserveFaceChange: (preserve: boolean) => void;
   onSceneExtensionChange: (extend: boolean) => void;
+  onFaceConsistencyLevelChange: (level: FaceConsistencyLevel) => void;
   className?: string;
 }
+
+const faceConsistencyOptions: { value: FaceConsistencyLevel; label: string; description: string }[] = [
+  { value: 'strict', label: 'Strict', description: '100% identity lock' },
+  { value: 'moderate', label: 'Moderate', description: 'Balanced preservation' },
+  { value: 'loose', label: 'Loose', description: 'Creative flexibility' },
+];
 
 export function VideoSettings({
   duration,
   aspectRatio,
   preserveFace,
   sceneExtension,
+  faceConsistencyLevel,
   onDurationChange,
   onAspectRatioChange,
   onPreserveFaceChange,
   onSceneExtensionChange,
+  onFaceConsistencyLevelChange,
   className
 }: VideoSettingsProps) {
   const durations = [5, 6, 8];
@@ -87,25 +99,51 @@ export function VideoSettings({
       </div>
 
       {/* Face Preservation Toggle */}
-      <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 border border-border/50">
-        <div>
-          <p className="text-sm font-medium text-foreground">Preserve Facial Features</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Strictly maintain reference face</p>
-        </div>
-        <button
-          onClick={() => onPreserveFaceChange(!preserveFace)}
-          className={cn(
-            "relative w-12 h-6 rounded-full transition-all",
-            preserveFace ? "bg-primary" : "bg-muted"
-          )}
-        >
-          <div
+      <div className="space-y-3">
+        <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/50 border border-border/50">
+          <div>
+            <p className="text-sm font-medium text-foreground">Preserve Facial Features</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Strictly maintain reference face</p>
+          </div>
+          <button
+            onClick={() => onPreserveFaceChange(!preserveFace)}
             className={cn(
-              "absolute top-1 w-4 h-4 rounded-full bg-foreground transition-all",
-              preserveFace ? "left-7" : "left-1"
+              "relative w-12 h-6 rounded-full transition-all",
+              preserveFace ? "bg-primary" : "bg-muted"
             )}
-          />
-        </button>
+          >
+            <div
+              className={cn(
+                "absolute top-1 w-4 h-4 rounded-full bg-foreground transition-all",
+                preserveFace ? "left-7" : "left-1"
+              )}
+            />
+          </button>
+        </div>
+
+        {/* Face Consistency Level - Only show when preserveFace is enabled */}
+        {preserveFace && (
+          <div className="p-4 rounded-xl bg-secondary/30 border border-border/30 space-y-3 animate-fade-in">
+            <label className="text-xs text-muted-foreground">Face Consistency Level</label>
+            <div className="grid grid-cols-3 gap-2">
+              {faceConsistencyOptions.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => onFaceConsistencyLevelChange(option.value)}
+                  className={cn(
+                    "py-2.5 px-3 rounded-lg text-sm transition-all",
+                    faceConsistencyLevel === option.value
+                      ? "bg-primary text-primary-foreground glow-sm"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span className="font-medium">{option.label}</span>
+                  <span className="block text-[10px] opacity-70 mt-0.5">{option.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Scene Extension Toggle */}

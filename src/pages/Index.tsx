@@ -21,6 +21,7 @@ import { AuthButton } from "@/components/AuthButton";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
 type GenerationMode = "single" | "batch" | "lyrics-sync";
+type FaceConsistencyLevel = "strict" | "moderate" | "loose";
 
 const Index = () => {
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
@@ -29,6 +30,7 @@ const Index = () => {
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [preserveFace, setPreserveFace] = useState(true);
+  const [faceConsistencyLevel, setFaceConsistencyLevel] = useState<FaceConsistencyLevel>("strict");
   const [sceneExtension, setSceneExtension] = useState(false);
   const [status, setStatus] = useState<GenerationStatusType>("idle");
   const [videoUrl, setVideoUrl] = useState<string | undefined>();
@@ -222,6 +224,7 @@ const Index = () => {
           lyrics: lyrics || undefined,
           referenceImage,
           preserveFace,
+          faceConsistencyLevel,
           sceneExtension,
           duration,
           aspectRatio,
@@ -249,7 +252,7 @@ const Index = () => {
       setStatus("failed");
       toast.error(err instanceof Error ? err.message : "Failed to generate video");
     }
-  }, [prompt, lyrics, referenceImage, preserveFace, sceneExtension, duration, aspectRatio, pollStatus]);
+  }, [prompt, lyrics, referenceImage, preserveFace, faceConsistencyLevel, sceneExtension, duration, aspectRatio, pollStatus]);
 
   useEffect(() => {
     return () => {
@@ -366,10 +369,12 @@ const Index = () => {
                       aspectRatio={aspectRatio}
                       preserveFace={preserveFace}
                       sceneExtension={sceneExtension}
+                      faceConsistencyLevel={faceConsistencyLevel}
                       onDurationChange={setDuration}
                       onAspectRatioChange={setAspectRatio}
                       onPreserveFaceChange={setPreserveFace}
                       onSceneExtensionChange={setSceneExtension}
+                      onFaceConsistencyLevelChange={setFaceConsistencyLevel}
                     />
                   </div>
 
