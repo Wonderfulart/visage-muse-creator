@@ -156,6 +156,12 @@ async function getUserFromToken(req: Request): Promise<{ userId: string } | null
   return { userId: user.id };
 }
 
+const TIER_LIMITS: Record<string, number> = {
+  free: 3,
+  creator_pro: 50,
+  music_video_pro: 150,
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -172,6 +178,58 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', userInfo.userId);
+
+    // Check subscription limits
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    
+    const { data: profile, error: profileError } = await adminClient
+      .from('profiles')
+      .select('subscription_tier, videos_generated_this_month, usage_reset_date')
+      .eq('id', userInfo.userId)
+      .single();
+
+    if (profileError) {
+      console.error('Error fetching profile:', profileError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to verify subscription' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const tier = profile?.subscription_tier || 'free';
+    let videosThisMonth = profile?.videos_generated_this_month || 0;
+    const limit = TIER_LIMITS[tier] || TIER_LIMITS.free;
+
+    // Check if we need to reset the monthly counter
+    const usageResetDate = profile?.usage_reset_date ? new Date(profile.usage_reset_date) : new Date();
+    const now = new Date();
+    
+    if (usageResetDate.getMonth() !== now.getMonth() || usageResetDate.getFullYear() !== now.getFullYear()) {
+      videosThisMonth = 0;
+      await adminClient
+        .from('profiles')
+        .update({ videos_generated_this_month: 0, usage_reset_date: now.toISOString() })
+        .eq('id', userInfo.userId);
+      console.log('Reset monthly counter for new month');
+    }
+
+    // Check if user has reached their limit
+    if (videosThisMonth >= limit) {
+      return new Response(
+        JSON.stringify({ 
+          error: `You've reached your monthly limit of ${limit} videos. Upgrade your plan for more!`,
+          limitReached: true,
+          tier,
+          videosGenerated: videosThisMonth,
+          limit
+        }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`User ${userInfo.userId} has generated ${videosThisMonth}/${limit} videos this month (tier: ${tier})`);
 
     const serviceAccountJson = Deno.env.get('VERTEX_SERVICE_ACCOUNT');
     
@@ -320,12 +378,20 @@ serve(async (req) => {
     const operationName = data.name;
     console.log('Video generation started, operation:', operationName);
 
+    // Increment video count for the user
+    await adminClient
+      .from('profiles')
+      .update({ videos_generated_this_month: videosThisMonth + 1 })
+      .eq('id', userInfo.userId);
+    console.log(`Incremented video count for user ${userInfo.userId} to ${videosThisMonth + 1}`);
+
     return new Response(
       JSON.stringify({
         success: true,
         requestId: operationName,
         modelId: modelId,
-        userId: userInfo.userId
+        userId: userInfo.userId,
+        videosRemaining: limit - (videosThisMonth + 1)
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Lock, Mail, Calendar, AlertCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, User, Lock, Mail, Calendar, AlertCircle, Trash2, CreditCard, Crown, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import {
@@ -23,14 +26,41 @@ import { supabase } from '@/integrations/supabase/client';
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
 
 const Profile = () => {
-  const { user, loading, updatePassword, signOut } = useAuth();
+  const { user, loading, updatePassword, signOut, session } = useAuth();
+  const { subscription, tierName, refreshSubscription } = useSubscription();
   const navigate = useNavigate();
   
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
   const [errors, setErrors] = useState<{ password?: string; confirmPassword?: string }>({});
+
+  const handleManageSubscription = async () => {
+    if (!session?.access_token) return;
+    
+    setPortalLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('customer-portal', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      
+      if (data.url) {
+        window.open(data.url, '_blank');
+      }
+    } catch (err) {
+      console.error('Portal error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to open subscription portal');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -184,6 +214,74 @@ const Profile = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Subscription */}
+          <div className="card-elevated rounded-2xl p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-primary/10">
+                  <Crown className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-heading font-semibold text-foreground">Subscription</h2>
+                  <p className="text-sm text-muted-foreground">Your plan and usage</p>
+                </div>
+              </div>
+              <Badge variant={subscription?.subscription_tier === 'free' ? 'secondary' : 'default'}>
+                {tierName}
+              </Badge>
+            </div>
+
+            <div className="grid gap-4">
+              {/* Usage Progress */}
+              <div className="p-4 rounded-xl bg-secondary/50">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-muted-foreground">Videos this month</p>
+                  <p className="text-sm font-medium text-foreground">
+                    {subscription?.videos_generated_this_month || 0} / {subscription?.videos_limit || 3}
+                  </p>
+                </div>
+                <Progress 
+                  value={((subscription?.videos_generated_this_month || 0) / (subscription?.videos_limit || 3)) * 100} 
+                  className="h-2"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  {subscription?.videos_remaining || 0} videos remaining
+                </p>
+              </div>
+
+              {subscription?.subscription_end && (
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-secondary/50">
+                  <Calendar className="w-5 h-5 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Renews</p>
+                    <p className="text-foreground font-medium">{formatDate(subscription.subscription_end)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              {subscription?.subscription_tier === 'free' ? (
+                <Button onClick={() => navigate('/pricing')} className="flex-1">
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Upgrade Plan
+                </Button>
+              ) : (
+                <Button onClick={handleManageSubscription} disabled={portalLoading} variant="outline" className="flex-1">
+                  {portalLoading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <CreditCard className="w-4 h-4 mr-2" />
+                  )}
+                  Manage Subscription
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => navigate('/pricing')}>
+                View Plans
+              </Button>
             </div>
           </div>
 

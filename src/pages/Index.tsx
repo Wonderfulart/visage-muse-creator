@@ -1,6 +1,6 @@
 // VeoStudio Pro - Main Generator Page
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music } from "lucide-react";
+import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -18,12 +18,16 @@ import { CoverArtGenerator } from "@/components/CoverArtGenerator";
 import { SafetyAnalyzer } from "@/components/SafetyAnalyzer";
 import { LyricsToVideoSync } from "@/components/LyricsToVideoSync";
 import { AuthButton } from "@/components/AuthButton";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import { useNavigate } from "react-router-dom";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
 type GenerationMode = "single" | "batch" | "lyrics-sync";
 type FaceConsistencyLevel = "strict" | "moderate" | "loose";
 
 const Index = () => {
+  const navigate = useNavigate();
+  const { subscription, refreshSubscription, canGenerateVideo, tierName } = useSubscription();
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [lyrics, setLyrics] = useState("");
@@ -278,9 +282,20 @@ const Index = () => {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Subscription Status */}
+            <button 
+              onClick={() => navigate('/pricing')}
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 hover:bg-primary/20 transition-colors cursor-pointer"
+            >
+              <Crown className="w-3.5 h-3.5 text-primary" />
+              <span className="text-xs font-medium text-primary">{tierName}</span>
+              <span className="text-xs text-muted-foreground">
+                {subscription?.videos_remaining ?? 0} left
+              </span>
+            </button>
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border/50">
               <Zap className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs text-muted-foreground">Veo 3.1 Connected</span>
+              <span className="text-xs text-muted-foreground">Veo 3.1</span>
             </div>
             <AuthButton />
           </div>
@@ -381,7 +396,7 @@ const Index = () => {
                   {/* Generate Button */}
                   <Button
                     onClick={handleGenerate}
-                    disabled={!prompt.trim() || status === "processing" || safetyWarnings.length > 0}
+                    disabled={!prompt.trim() || status === "processing" || safetyWarnings.length > 0 || !canGenerateVideo}
                     variant="hero"
                     size="lg"
                     className="w-full"
@@ -391,6 +406,11 @@ const Index = () => {
                         <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
                         Generating...
                       </>
+                    ) : !canGenerateVideo ? (
+                      <>
+                        <Crown className="w-5 h-5" />
+                        Upgrade to Generate
+                      </>
                     ) : (
                       <>
                         <Sparkles className="w-5 h-5" />
@@ -398,6 +418,12 @@ const Index = () => {
                       </>
                     )}
                   </Button>
+                  {!canGenerateVideo && (
+                    <p className="text-xs text-center text-muted-foreground">
+                      You've used all your videos this month.{" "}
+                      <button onClick={() => navigate('/pricing')} className="text-primary underline">Upgrade your plan</button>
+                    </p>
+                  )}
                 </div>
 
                 {/* Right Panel - Preview */}
