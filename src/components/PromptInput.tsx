@@ -3,6 +3,7 @@ import { Wand2, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface PromptInputProps {
   value: string;
@@ -14,6 +15,7 @@ export function PromptInput({ value, onChange, className }: PromptInputProps) {
   const [isFocused, setIsFocused] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const suggestions = [
     "Cinematic slow-mo walking through neon-lit streets",
@@ -23,6 +25,15 @@ export function PromptInput({ value, onChange, className }: PromptInputProps) {
   ];
 
   const handleEnhancePrompt = async () => {
+    if (!user) {
+      toast({
+        title: "Sign in required",
+        description: "Please sign in to use AI prompt enhancement",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!value.trim()) {
       toast({
         title: "No prompt to enhance",
