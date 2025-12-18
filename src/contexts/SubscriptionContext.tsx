@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import { useAuth } from './AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 
-export type SubscriptionTier = 'free' | 'creator_pro' | 'music_video_pro';
+export type SubscriptionTier = 'free' | 'creator_pro' | 'music_video_pro' | 'admin';
 
 interface SubscriptionData {
   subscribed: boolean;
@@ -35,6 +35,7 @@ const TIER_NAMES: Record<SubscriptionTier, string> = {
   free: 'Free',
   creator_pro: 'Creator Pro',
   music_video_pro: 'Music Video Pro',
+  admin: 'Admin',
 };
 
 const SubscriptionContext = createContext<SubscriptionContextType | undefined>(undefined);

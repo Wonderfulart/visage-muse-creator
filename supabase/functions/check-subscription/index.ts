@@ -7,6 +7,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Admin emails with unlimited access
+const ADMIN_EMAILS = ['shustinedominiquie@gmail.com'];
+
 // Product IDs from Stripe
 const PRODUCT_TO_TIER: Record<string, string> = {
   "prod_TcVk7bToD3CHAF": "free",
@@ -18,6 +21,7 @@ const TIER_LIMITS: Record<string, number> = {
   free: 3,
   creator_pro: 50,
   music_video_pro: 150,
+  admin: 999999,
 };
 
 const logStep = (step: string, details?: unknown) => {
@@ -52,6 +56,30 @@ serve(async (req) => {
     const user = userData.user;
     if (!user?.email) throw new Error("User not authenticated or email not available");
     logStep("User authenticated", { userId: user.id, email: user.email });
+
+    // Check if user is admin
+    const isAdmin = ADMIN_EMAILS.includes(user.email.toLowerCase());
+    if (isAdmin) {
+      logStep("Admin user detected, returning unlimited access");
+      
+      // Update profile to admin tier
+      await supabaseClient
+        .from("profiles")
+        .update({ subscription_tier: "admin" })
+        .eq("id", user.id);
+
+      return new Response(JSON.stringify({
+        subscribed: true,
+        subscription_tier: "admin",
+        subscription_end: null,
+        videos_generated_this_month: 0,
+        videos_limit: 999999,
+        videos_remaining: 999999,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
 
