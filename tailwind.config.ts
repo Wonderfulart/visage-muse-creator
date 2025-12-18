@@ -55,6 +55,16 @@ export default {
           primary: "hsl(var(--glow-primary))",
           secondary: "hsl(var(--glow-secondary))",
         },
+        rainbow: {
+          red: "hsl(var(--rainbow-red))",
+          orange: "hsl(var(--rainbow-orange))",
+          yellow: "hsl(var(--rainbow-yellow))",
+          green: "hsl(var(--rainbow-green))",
+          cyan: "hsl(var(--rainbow-cyan))",
+          blue: "hsl(var(--rainbow-blue))",
+          purple: "hsl(var(--rainbow-purple))",
+          pink: "hsl(var(--rainbow-pink))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -84,11 +94,16 @@ export default {
           "0%": { transform: "scale(0.95)", opacity: "1" },
           "75%, 100%": { transform: "scale(1.3)", opacity: "0" },
         },
+        "rainbow-flow": {
+          "0%": { backgroundPosition: "0% 50%" },
+          "100%": { backgroundPosition: "200% 50%" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "pulse-ring": "pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        "rainbow-flow": "rainbow-flow 8s linear infinite",
       },
     },
   },
