@@ -156,10 +156,14 @@ async function getUserFromToken(req: Request): Promise<{ userId: string } | null
   return { userId: user.id };
 }
 
+// Admin emails with unlimited access
+const ADMIN_EMAILS = ['shustinedominiquie@gmail.com'];
+
 const TIER_LIMITS: Record<string, number> = {
   free: 3,
   creator_pro: 50,
   music_video_pro: 150,
+  admin: 999999,
 };
 
 serve(async (req) => {
@@ -183,6 +187,15 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Get user email to check admin status
+    const { data: userData } = await adminClient.auth.admin.getUserById(userInfo.userId);
+    const userEmail = userData?.user?.email?.toLowerCase() || '';
+    const isAdmin = ADMIN_EMAILS.includes(userEmail);
+    
+    if (isAdmin) {
+      console.log('Admin user detected, bypassing limits');
+    }
     
     const { data: profile, error: profileError } = await adminClient
       .from('profiles')
@@ -198,7 +211,7 @@ serve(async (req) => {
       );
     }
 
-    const tier = profile?.subscription_tier || 'free';
+    const tier = isAdmin ? 'admin' : (profile?.subscription_tier || 'free');
     let videosThisMonth = profile?.videos_generated_this_month || 0;
     const limit = TIER_LIMITS[tier] || TIER_LIMITS.free;
 
@@ -215,8 +228,8 @@ serve(async (req) => {
       console.log('Reset monthly counter for new month');
     }
 
-    // Check if user has reached their limit
-    if (videosThisMonth >= limit) {
+    // Check if user has reached their limit (admins are always under limit)
+    if (!isAdmin && videosThisMonth >= limit) {
       return new Response(
         JSON.stringify({ 
           error: `You've reached your monthly limit of ${limit} videos. Upgrade your plan for more!`,

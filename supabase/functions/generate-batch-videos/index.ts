@@ -241,6 +241,14 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Admin emails with unlimited access
+    const ADMIN_EMAILS = ['shustinedominiquie@gmail.com'];
+    
+    // Get user email to check admin status
+    const { data: userData } = await adminClient.auth.admin.getUserById(userInfo.userId);
+    const userEmail = userData?.user?.email?.toLowerCase() || '';
+    const isAdmin = ADMIN_EMAILS.includes(userEmail);
     
     const { data: profile } = await adminClient
       .from('profiles')
@@ -248,9 +256,9 @@ serve(async (req) => {
       .eq('id', userInfo.userId)
       .single();
 
-    const tier = profile?.subscription_tier || 'free';
+    const tier = isAdmin ? 'admin' : (profile?.subscription_tier || 'free');
     const shouldAddWatermark = tier === 'free';
-    console.log(`Batch generation for tier ${tier}, watermark: ${shouldAddWatermark}`);
+    console.log(`Batch generation for tier ${tier}, watermark: ${shouldAddWatermark}, isAdmin: ${isAdmin}`);
 
     console.log(`Starting batch generation of ${scenes.length} scenes`);
 
