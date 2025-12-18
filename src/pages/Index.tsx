@@ -22,6 +22,9 @@ import { AudioEditor } from "@/components/AudioEditor";
 import { AuthButton } from "@/components/AuthButton";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useNavigate } from "react-router-dom";
+import { GenerationTimeEstimator } from "@/components/GenerationTimeEstimator";
+import { PromptSafetyChecker } from "@/components/PromptSafetyChecker";
+import { PromptGuide } from "@/components/PromptGuide";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
 type GenerationMode = "single" | "batch" | "lyrics-sync" | "stitch" | "audio";
@@ -145,6 +148,52 @@ const Index = () => {
       toast.error("Failed to start lyrics sync generation");
       setBatchStatus("idle");
     }
+  };
+
+  // Regenerate individual scene
+  const handleRegenerateScene = async (sceneId: string, sceneDescription: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-video", {
+        body: {
+          prompt: sceneDescription,
+          referenceImage,
+          preserveFace,
+          duration: 8,
+          aspectRatio,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.requestId) {
+        toast.info(`Regenerating scene... Check gallery when complete.`);
+        // Start polling for this single regeneration
+        const pollInterval = setInterval(async () => {
+          const { data: statusData } = await supabase.functions.invoke("check-video-status", {
+            body: { requestId: data.requestId },
+          });
+          if (statusData?.status === "completed") {
+            clearInterval(pollInterval);
+            setGalleryRefresh((prev) => prev + 1);
+            toast.success("Scene regenerated!");
+          } else if (statusData?.status === "failed") {
+            clearInterval(pollInterval);
+            toast.error("Scene regeneration failed");
+          }
+        }, 5000);
+      }
+    } catch (error) {
+      console.error("Regeneration error:", error);
+      toast.error("Failed to regenerate scene");
+    }
+  };
+
+  // Calculate prompt complexity
+  const getPromptComplexity = (text: string): 'simple' | 'medium' | 'complex' => {
+    const length = text.length;
+    if (length < 50) return 'simple';
+    if (length < 150) return 'medium';
+    return 'complex';
   };
 
   // Poll individual batch operation
@@ -435,6 +484,16 @@ const Index = () => {
                     }}
                   />
 
+                  {/* Prompt Safety Checker */}
+                  <PromptSafetyChecker
+                    prompt={prompt}
+                    referenceImage={referenceImage}
+                    onSuggestionAccepted={(newPrompt) => setPrompt(newPrompt)}
+                  />
+
+                  {/* Prompt Guide */}
+                  <PromptGuide />
+
                   {/* Video Settings */}
                   <div className="card-elevated rounded-2xl p-6">
                     <VideoSettings
@@ -547,6 +606,13 @@ const Index = () => {
                         ? `Generating ${batchScenes.length} Scenes...`
                         : `Generate ${batchScenes.length} Scenes`}
                   </Button>
+                  {/* Time Estimator */}
+                  <GenerationTimeEstimator
+                    sceneCount={batchScenes.length}
+                    averageDuration={8}
+                    complexity={getPromptComplexity(batchScenes.map(s => s.prompt).join(' '))}
+                    hasReferenceImage={!!referenceImage}
+                  />
                 </div>
 
                 <div className="space-y-6">
@@ -616,6 +682,16 @@ const Index = () => {
                 </div>
 
                 <div className="space-y-6">
+                  {/* Time Estimator for Lyrics Sync */}
+                  {lyricsScenes.length > 0 && (
+                    <GenerationTimeEstimator
+                      sceneCount={lyricsScenes.length}
+                      averageDuration={audioDuration && lyricsScenes.length > 0 ? Math.floor(audioDuration / lyricsScenes.length) : 8}
+                      complexity={getPromptComplexity(prompt)}
+                      hasReferenceImage={!!referenceImage}
+                    />
+                  )}
+
                   {/* Lyrics to Video Sync */}
                   <LyricsToVideoSync
                     lyrics={lyrics}
@@ -627,6 +703,7 @@ const Index = () => {
                       toast.success(`Generated ${scenes.length} synced scenes!`);
                     }}
                     onGenerateBatch={handleLyricsSyncGenerate}
+                    onRegenerateScene={handleRegenerateScene}
                   />
 
                   {/* Batch Progress for Lyrics Sync */}
