@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Music, Sparkles, Loader2 } from 'lucide-react';
+import { Music, Sparkles, Loader2, Play, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -10,15 +10,25 @@ interface LyricLine {
   emotion: string;
   sceneDescription: string;
   order: number;
+  startTime?: number;
+  endTime?: number;
 }
 
 interface LyricsToVideoSyncProps {
   lyrics: string;
   baseVisualStyle: string;
+  audioDuration?: number;
   onScenesGenerated: (scenes: LyricLine[]) => void;
+  onGenerateBatch?: () => void;
 }
 
-export const LyricsToVideoSync = ({ lyrics, baseVisualStyle, onScenesGenerated }: LyricsToVideoSyncProps) => {
+export const LyricsToVideoSync = ({ 
+  lyrics, 
+  baseVisualStyle, 
+  audioDuration,
+  onScenesGenerated,
+  onGenerateBatch
+}: LyricsToVideoSyncProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [generatedScenes, setGeneratedScenes] = useState<LyricLine[]>([]);
 
@@ -41,11 +51,20 @@ export const LyricsToVideoSync = ({ lyrics, baseVisualStyle, onScenesGenerated }
 
       // Parse the response into scenes
       const lines = lyrics.split('\n').filter(l => l.trim());
+      const lineCount = Math.min(lines.length, 8);
+      
+      // Calculate timing based on audio duration if provided
+      const secondsPerLine = audioDuration && audioDuration > 0 
+        ? Math.max(5, Math.floor(audioDuration / lineCount))
+        : 8;
+
       const scenes: LyricLine[] = lines.slice(0, 8).map((line, idx) => ({
         line,
         emotion: 'emotional',
         sceneDescription: data.enhancedPrompt || `Cinematic scene for: "${line}"`,
-        order: idx + 1
+        order: idx + 1,
+        startTime: idx * secondsPerLine,
+        endTime: (idx + 1) * secondsPerLine
       }));
 
       setGeneratedScenes(scenes);
@@ -74,6 +93,16 @@ export const LyricsToVideoSync = ({ lyrics, baseVisualStyle, onScenesGenerated }
           {lyrics ? `${lyrics.split('\n').filter(l => l.trim()).length} lines detected` : 'Add lyrics in the Quick Generate tab first'}
         </p>
 
+        {/* Audio Duration Indicator */}
+        {audioDuration && audioDuration > 0 && (
+          <div className="flex items-center gap-2 mb-4 p-3 rounded-xl bg-primary/10 border border-primary/20">
+            <Clock className="w-4 h-4 text-primary" />
+            <span className="text-sm text-primary">
+              Auto-timed from audio: {Math.floor(audioDuration / 60)}:{String(Math.floor(audioDuration % 60)).padStart(2, '0')}
+            </span>
+          </div>
+        )}
+
         <Button
           onClick={handleAnalyze}
           disabled={isAnalyzing || !lyrics.trim()}
@@ -101,7 +130,7 @@ export const LyricsToVideoSync = ({ lyrics, baseVisualStyle, onScenesGenerated }
             <Badge>{generatedScenes.length} scenes</Badge>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[400px] overflow-y-auto">
             {generatedScenes.map((scene) => (
               <div key={scene.order} className="p-4 rounded-xl bg-secondary/30 border border-border">
                 <div className="flex items-center gap-2 mb-2">
@@ -111,6 +140,11 @@ export const LyricsToVideoSync = ({ lyrics, baseVisualStyle, onScenesGenerated }
                   <p className="text-sm font-medium text-foreground truncate flex-1">
                     "{scene.line}"
                   </p>
+                  {scene.startTime !== undefined && scene.endTime !== undefined && (
+                    <span className="text-xs text-muted-foreground">
+                      {scene.startTime}s - {scene.endTime}s
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground pl-8">
                   {scene.sceneDescription}
@@ -118,6 +152,19 @@ export const LyricsToVideoSync = ({ lyrics, baseVisualStyle, onScenesGenerated }
               </div>
             ))}
           </div>
+
+          {/* Generate All Button */}
+          {onGenerateBatch && (
+            <Button
+              onClick={onGenerateBatch}
+              variant="hero"
+              size="lg"
+              className="w-full mt-4"
+            >
+              <Play className="w-5 h-5 mr-2" />
+              Generate All {generatedScenes.length} Scenes
+            </Button>
+          )}
         </div>
       )}
     </div>

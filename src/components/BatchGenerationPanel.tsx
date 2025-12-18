@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Layers, GripVertical } from 'lucide-react';
+import { Plus, Trash2, Layers, GripVertical, Play } from 'lucide-react';
 
 interface Scene {
   id: string;
@@ -15,9 +14,10 @@ interface Scene {
 interface BatchGenerationPanelProps {
   onScenesChange: (scenes: Scene[]) => void;
   aspectRatio: string;
+  onGenerateBatch?: () => void;
 }
 
-export const BatchGenerationPanel = ({ onScenesChange, aspectRatio }: BatchGenerationPanelProps) => {
+export const BatchGenerationPanel = ({ onScenesChange, aspectRatio, onGenerateBatch }: BatchGenerationPanelProps) => {
   const [scenes, setScenes] = useState<Scene[]>([
     { id: '1', order: 1, prompt: '', duration: 8 }
   ]);
@@ -50,6 +50,8 @@ export const BatchGenerationPanel = ({ onScenesChange, aspectRatio }: BatchGener
     setScenes(updated);
     onScenesChange(updated);
   };
+
+  const hasValidScenes = scenes.some(s => s.prompt.trim());
 
   return (
     <div className="card-elevated rounded-2xl p-6">
@@ -97,6 +99,19 @@ export const BatchGenerationPanel = ({ onScenesChange, aspectRatio }: BatchGener
         <Plus className="w-4 h-4 mr-2" />
         Add Scene {scenes.length >= 10 && '(Max 10)'}
       </Button>
+
+      {/* Generate All Button */}
+      {onGenerateBatch && hasValidScenes && (
+        <Button
+          onClick={onGenerateBatch}
+          variant="hero"
+          size="lg"
+          className="w-full mt-4"
+        >
+          <Play className="w-5 h-5 mr-2" />
+          Generate All {scenes.length} Scenes
+        </Button>
+      )}
     </div>
   );
 };

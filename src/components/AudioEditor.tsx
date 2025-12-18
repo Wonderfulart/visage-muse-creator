@@ -7,7 +7,11 @@ import { WaveformDisplay } from './WaveformDisplay';
 import { AudioTrimmer } from './AudioTrimmer';
 import { toast } from 'sonner';
 
-export const AudioEditor = () => {
+interface AudioEditorProps {
+  onAudioLoaded?: (duration: number) => void;
+}
+
+export const AudioEditor = ({ onAudioLoaded }: AudioEditorProps) => {
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string>('');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -30,6 +34,7 @@ export const AudioEditor = () => {
     const handleLoadedMetadata = () => {
       setDuration(audio.duration);
       setTrimEnd(audio.duration);
+      onAudioLoaded?.(audio.duration);
     };
     const handleEnded = () => setIsPlaying(false);
 
