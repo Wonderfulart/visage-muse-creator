@@ -271,10 +271,10 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b border-border/30 bg-glass sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-primary glow-sm">
+            <div className="p-2 rounded-xl bg-gradient-primary glow-rainbow-sm">
               <Clapperboard className="w-5 h-5 text-primary-foreground" />
             </div>
             <div>
@@ -287,7 +287,7 @@ const Index = () => {
             {/* Subscription Status */}
             <button 
               onClick={() => navigate('/pricing')}
-              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 hover:bg-primary/20 transition-colors cursor-pointer"
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-glass border border-primary/20 hover:border-primary/40 transition-all cursor-pointer"
             >
               <Crown className="w-3.5 h-3.5 text-primary" />
               <span className="text-xs font-medium text-primary">{tierName}</span>
@@ -295,8 +295,8 @@ const Index = () => {
                 {subscription?.videos_remaining ?? 0} left
               </span>
             </button>
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border/50">
-              <Zap className="w-3.5 h-3.5 text-primary" />
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-glass border border-border/30">
+              <Zap className="w-3.5 h-3.5 text-rainbow-cyan" />
               <span className="text-xs text-muted-foreground">Veo 3.1</span>
             </div>
             <AuthButton />

@@ -14,13 +14,15 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:
-          "border border-border bg-transparent hover:bg-secondary hover:text-foreground",
+          "bg-glass border border-border/50 hover:bg-glass-strong hover:border-primary/30 text-foreground",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-secondary hover:text-foreground",
+          "bg-glass border border-border/30 text-secondary-foreground hover:bg-glass-strong font-medium",
+        ghost: "hover:bg-glass transition-all font-medium",
         link: "text-primary underline-offset-4 hover:underline",
-        hero: "bg-gradient-primary text-primary-foreground glow-primary hover:opacity-90 font-semibold",
-        glow: "bg-card border border-primary/50 text-foreground hover:border-primary glow-sm hover:glow-primary",
+        hero: "btn-rainbow text-primary-foreground font-semibold shadow-lg",
+        glow: "bg-glass border border-primary/30 text-foreground hover:border-primary/50 glow-rainbow-sm hover:glow-rainbow",
+        rainbow: "btn-rainbow text-primary-foreground shadow-lg font-semibold",
+        "rainbow-outline": "bg-glass border-2 border-primary/20 hover:border-primary/40 hover:bg-glass-strong text-foreground font-semibold",
       },
       size: {
         default: "h-10 px-5 py-2",
