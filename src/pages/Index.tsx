@@ -52,6 +52,8 @@ const Index = () => {
   const [batchScenes, setBatchScenes] = useState<any[]>([]);
   const [batchOperations, setBatchOperations] = useState<any[]>([]);
   const [batchStatus, setBatchStatus] = useState<"idle" | "generating" | "polling" | "completed">("idle");
+  const [lyricsScenes, setLyricsScenes] = useState<any[]>([]);
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number | null>(null);
 
@@ -92,6 +94,55 @@ const Index = () => {
     } catch (error) {
       console.error("Batch generation error:", error);
       toast.error("Failed to start batch generation");
+      setBatchStatus("idle");
+    }
+  };
+
+  // Lyrics sync batch generation handler
+  const handleLyricsSyncGenerate = async () => {
+    if (lyricsScenes.length === 0) {
+      toast.error("No scenes generated from lyrics");
+      return;
+    }
+
+    setBatchStatus("generating");
+    setBatchOperations([]);
+
+    try {
+      // Convert lyrics scenes to batch scenes format
+      const scenesToGenerate = lyricsScenes.map((scene, idx) => ({
+        id: `lyrics-${idx}`,
+        order: scene.order || idx + 1,
+        prompt: scene.sceneDescription,
+        duration: scene.endTime && scene.startTime ? scene.endTime - scene.startTime : 8,
+      }));
+
+      const { data, error } = await supabase.functions.invoke("generate-batch-videos", {
+        body: {
+          scenes: scenesToGenerate,
+          referenceImage,
+          preserveFace,
+          aspectRatio,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.operations) {
+        setBatchOperations(data.operations);
+        setBatchStatus("polling");
+        toast.success(`Started generating ${lyricsScenes.length} synced scenes!`);
+
+        // Start polling for each operation
+        data.operations.forEach((op: any) => {
+          if (op.success && op.requestId) {
+            pollBatchOperation(op.requestId, op.order);
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Lyrics sync generation error:", error);
+      toast.error("Failed to start lyrics sync generation");
       setBatchStatus("idle");
     }
   };
@@ -478,6 +529,7 @@ const Index = () => {
                       setBatchScenes(scenes);
                     }}
                     aspectRatio={aspectRatio}
+                    onGenerateBatch={handleBatchGenerate}
                   />
 
                   {/* Generate Batch Button */}
@@ -568,12 +620,76 @@ const Index = () => {
                   <LyricsToVideoSync
                     lyrics={lyrics}
                     baseVisualStyle={prompt}
+                    audioDuration={audioDuration || undefined}
                     onScenesGenerated={(scenes) => {
+                      setLyricsScenes(scenes);
                       console.log("Lyrics scenes:", scenes);
                       toast.success(`Generated ${scenes.length} synced scenes!`);
                     }}
+                    onGenerateBatch={handleLyricsSyncGenerate}
                   />
+
+                  {/* Batch Progress for Lyrics Sync */}
+                  {batchOperations.length > 0 && (
+                    <div className="card-elevated rounded-2xl p-6">
+                      <h3 className="font-heading font-semibold mb-4">Generation Progress</h3>
+                      <div className="space-y-3">
+                        {batchOperations.map((op, idx) => (
+                          <div key={idx} className="p-3 rounded-lg border border-border/50 bg-card/50">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium">Scene {op.order}</span>
+                              {op.success ? (
+                                op.status === "completed" ? (
+                                  <Badge variant="default">✓ Complete</Badge>
+                                ) : op.status === "failed" ? (
+                                  <Badge variant="destructive">✗ Failed</Badge>
+                                ) : (
+                                  <Badge variant="secondary">⏳ Generating...</Badge>
+                                )
+                              ) : (
+                                <Badge variant="destructive">Error</Badge>
+                              )}
+                            </div>
+                            {op.videoUrl && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 w-full"
+                                onClick={() => window.open(op.videoUrl, "_blank")}
+                              >
+                                View Video
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
+              </div>
+            </TabsContent>
+
+            {/* Stitch Mode */}
+            <TabsContent value="stitch" className="space-y-6 mt-6">
+              <StitchVideos />
+            </TabsContent>
+
+            {/* Audio Editor Mode */}
+            <TabsContent value="audio" className="space-y-6 mt-6">
+              <div className="max-w-3xl mx-auto">
+                <div className="card-elevated rounded-2xl p-6 mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Volume2 className="w-5 h-5 text-primary" />
+                    <h3 className="font-heading font-semibold text-foreground">Audio Editor</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Upload your music to use for lyrics timing. The audio duration will automatically sync with the Lyrics tab.
+                  </p>
+                </div>
+                <AudioEditor onAudioLoaded={(duration) => {
+                  setAudioDuration(duration);
+                  toast.success(`Audio loaded: ${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`);
+                }} />
               </div>
             </TabsContent>
           </Tabs>
