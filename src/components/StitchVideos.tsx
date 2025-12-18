@@ -72,7 +72,16 @@ export const StitchVideos = () => {
       // Upload background music if present
       let musicUrl = null;
       if (backgroundMusic) {
-        const musicPath = `${crypto.randomUUID()}/${backgroundMusic.name}`;
+        // Get the authenticated user's ID for RLS-compliant path
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          toast.error('You must be logged in to upload music');
+          setIsProcessing(false);
+          return;
+        }
+        
+        // Upload with user ID as first folder component to match RLS policy
+        const musicPath = `${user.id}/${crypto.randomUUID()}_${backgroundMusic.name}`;
         const { error: uploadError } = await supabase.storage
           .from('background-music')
           .upload(musicPath, backgroundMusic);
