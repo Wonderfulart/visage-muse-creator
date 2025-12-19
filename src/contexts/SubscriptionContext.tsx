@@ -97,11 +97,11 @@ export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [user, refreshSubscription]);
 
-  // Auto-refresh every minute
+  // Auto-refresh every 5 minutes
   useEffect(() => {
     if (!user) return;
     
-    const interval = setInterval(refreshSubscription, 60000);
+    const interval = setInterval(refreshSubscription, 300000);
     return () => clearInterval(interval);
   }, [user, refreshSubscription]);
 

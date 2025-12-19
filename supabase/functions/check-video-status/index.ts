@@ -405,7 +405,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         status: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error' 
+        error: 'Failed to check video status. Please try again.' 
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
