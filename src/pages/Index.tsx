@@ -1,6 +1,6 @@
 // VeoStudio Pro - Main Generator Page
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown, Scissors, Volume2, BookOpen } from "lucide-react";
+import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown, Scissors, Volume2, BookOpen, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -21,10 +21,11 @@ import { StitchVideos } from "@/components/StitchVideos";
 import { AudioEditor } from "@/components/AudioEditor";
 import { AuthButton } from "@/components/AuthButton";
 import { useSubscription } from "@/contexts/SubscriptionContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { GenerationTimeEstimator } from "@/components/GenerationTimeEstimator";
 import { PromptSafetyChecker } from "@/components/PromptSafetyChecker";
 import { PromptGuide } from "@/components/PromptGuide";
+import { useAdmin } from "@/hooks/useAdmin";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
 type GenerationMode = "single" | "batch" | "lyrics-sync" | "stitch" | "audio";
@@ -33,6 +34,7 @@ type FaceConsistencyLevel = "strict" | "moderate" | "loose";
 const Index = () => {
   const navigate = useNavigate();
   const { subscription, refreshSubscription, canGenerateVideo, tierName } = useSubscription();
+  const { isAdmin } = useAdmin();
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [lyrics, setLyrics] = useState("");
@@ -384,6 +386,16 @@ const Index = () => {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Admin Link */}
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-destructive/10 border border-destructive/20 hover:border-destructive/40 transition-all"
+              >
+                <Shield className="w-3.5 h-3.5 text-destructive" />
+                <span className="text-xs font-medium text-destructive">Admin</span>
+              </Link>
+            )}
             {/* Subscription Status */}
             <button 
               onClick={() => navigate('/pricing')}
