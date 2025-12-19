@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Clapperboard, Mail, Lock, AlertCircle, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +44,20 @@ const Auth = () => {
   
   const { user, signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Handle OAuth errors from URL
+  useEffect(() => {
+    const error = searchParams.get('error');
+    const errorDescription = searchParams.get('error_description');
+    
+    if (error) {
+      const message = errorDescription || 'Authentication failed. Please try again.';
+      toast.error(message);
+      // Clear the error params from URL
+      window.history.replaceState({}, '', '/auth');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (user) {
