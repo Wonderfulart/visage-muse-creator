@@ -154,6 +154,39 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_add_user_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: undefined
+      }
+      admin_remove_user_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: undefined
+      }
+      get_all_users_for_admin: {
+        Args: never
+        Returns: {
+          created_at: string
+          email: string
+          id: string
+          subscription_tier: string
+          videos_generated_this_month: number
+        }[]
+      }
+      get_user_roles_for_admin: {
+        Args: never
+        Returns: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
