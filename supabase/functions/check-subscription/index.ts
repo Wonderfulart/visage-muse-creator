@@ -7,8 +7,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Admin emails with unlimited access
-const ADMIN_EMAILS = ['shustinedominiquie@gmail.com'];
+// Check if user has admin role via database function
+async function checkIsAdmin(supabaseClient: any, userId: string): Promise<boolean> {
+  const { data, error } = await supabaseClient.rpc('has_role', {
+    _user_id: userId,
+    _role: 'admin'
+  });
+  if (error) {
+    console.error('Error checking admin role:', error);
+    return false;
+  }
+  return data === true;
+}
 
 // Product IDs from Stripe
 const PRODUCT_TO_TIER: Record<string, string> = {
@@ -57,8 +67,8 @@ serve(async (req) => {
     if (!user?.email) throw new Error("User not authenticated or email not available");
     logStep("User authenticated", { userId: user.id, email: user.email });
 
-    // Check if user is admin
-    const isAdmin = ADMIN_EMAILS.includes(user.email.toLowerCase());
+    // Check if user is admin via database role
+    const isAdmin = await checkIsAdmin(supabaseClient, user.id);
     if (isAdmin) {
       logStep("Admin user detected, returning unlimited access");
       
@@ -191,7 +201,7 @@ serve(async (req) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logStep("ERROR", { message: errorMessage });
-    return new Response(JSON.stringify({ error: errorMessage }), {
+    return new Response(JSON.stringify({ error: "Failed to check subscription. Please try again." }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 500,
     });

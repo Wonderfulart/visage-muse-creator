@@ -156,8 +156,18 @@ async function getUserFromToken(req: Request): Promise<{ userId: string } | null
   return { userId: user.id };
 }
 
-// Admin emails with unlimited access
-const ADMIN_EMAILS = ['shustinedominiquie@gmail.com'];
+// Check if user has admin role via database function
+async function checkIsAdmin(adminClient: any, userId: string): Promise<boolean> {
+  const { data, error } = await adminClient.rpc('has_role', {
+    _user_id: userId,
+    _role: 'admin'
+  });
+  if (error) {
+    console.error('Error checking admin role:', error);
+    return false;
+  }
+  return data === true;
+}
 
 const TIER_LIMITS: Record<string, number> = {
   free: 3,
@@ -188,10 +198,8 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get user email to check admin status
-    const { data: userData } = await adminClient.auth.admin.getUserById(userInfo.userId);
-    const userEmail = userData?.user?.email?.toLowerCase() || '';
-    const isAdmin = ADMIN_EMAILS.includes(userEmail);
+    // Check if user is admin via database role
+    const isAdmin = await checkIsAdmin(adminClient, userInfo.userId);
     
     if (isAdmin) {
       console.log('Admin user detected, bypassing limits');
@@ -416,7 +424,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in generate-video function:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ error: 'Video generation failed. Please try again.' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

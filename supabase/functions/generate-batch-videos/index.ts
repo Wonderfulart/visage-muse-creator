@@ -242,13 +242,12 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Admin emails with unlimited access
-    const ADMIN_EMAILS = ['shustinedominiquie@gmail.com'];
-    
-    // Get user email to check admin status
-    const { data: userData } = await adminClient.auth.admin.getUserById(userInfo.userId);
-    const userEmail = userData?.user?.email?.toLowerCase() || '';
-    const isAdmin = ADMIN_EMAILS.includes(userEmail);
+    // Check if user is admin via database role
+    const { data: isAdminData } = await (adminClient as any).rpc('has_role', {
+      _user_id: userInfo.userId,
+      _role: 'admin'
+    });
+    const isAdmin = isAdminData === true;
     
     const { data: profile } = await adminClient
       .from('profiles')
@@ -298,7 +297,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in generate-batch-videos function:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ error: 'Batch video generation failed. Please try again.' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

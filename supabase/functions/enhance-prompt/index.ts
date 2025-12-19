@@ -156,9 +156,8 @@ Respond with ONLY the enhanced prompt, no explanations or additional text.`
 
   } catch (error) {
     console.error('Error enhancing prompt:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to enhance prompt';
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: 'Failed to enhance prompt. Please try again.' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
