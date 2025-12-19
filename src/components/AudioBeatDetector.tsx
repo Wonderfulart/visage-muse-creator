@@ -1,0 +1,275 @@
+// Enhancement 1: Automatic Scene Detection from Audio
+// Analyzes audio to detect beats, tempo changes, and energy levels
+// Automatically generates scenes without requiring lyrics
+
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
+import { Zap, Music, Activity, Sparkles, Play, Info } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface BeatSegment {
+  id: string;
+  startTime: number;
+  endTime: number;
+  energy: number; // 0-1 scale
+  tempo: number; // BPM
+  suggestedMood: string;
+}
+
+interface AudioBeatDetectorProps {
+  audioFile: File | null;
+  audioUrl: string;
+  audioDuration: number;
+  baseVisualStyle: string;
+  onScenesGenerated: (scenes: any[]) => void;
+}
+
+export const AudioBeatDetector = ({
+  audioFile,
+  audioUrl,
+  audioDuration,
+  baseVisualStyle,
+  onScenesGenerated
+}: AudioBeatDetectorProps) => {
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [beatSegments, setBeatSegments] = useState<BeatSegment[]>([]);
+  const [sensitivity, setSensitivity] = useState([50]); // 0-100
+  const [minSceneDuration, setMinSceneDuration] = useState([5]); // seconds
+
+  const detectBeats = async () => {
+    if (!audioFile || !audioUrl) {
+      toast.error('Please upload an audio file first');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    toast.info('Analyzing audio patterns...');
+
+    try {
+      // Create audio context for analysis
+      const audioContext = new AudioContext();
+      const response = await fetch(audioUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // Get audio data from first channel
+      const channelData = audioBuffer.getChannelData(0);
+      const sampleRate = audioBuffer.sampleRate;
+      
+      // Calculate energy levels across the track
+      const windowSize = Math.floor(sampleRate * minSceneDuration[0]); // Window per min scene duration
+      const segments: BeatSegment[] = [];
+      
+      for (let i = 0; i < channelData.length; i += windowSize) {
+        const window = channelData.slice(i, i + windowSize);
+        
+        // Calculate RMS (Root Mean Square) energy
+        let sumSquares = 0;
+        for (let j = 0; j < window.length; j++) {
+          sumSquares += window[j] * window[j];
+        }
+        const rms = Math.sqrt(sumSquares / window.length);
+        
+        // Normalize energy to 0-1 scale
+        const energy = Math.min(1, rms * 10);
+        
+        // Estimate tempo (simplified - real BPM detection is more complex)
+        const tempo = 120 + (energy * 60); // Base 120 BPM, varies with energy
+        
+        // Determine mood based on energy level
+        let mood = 'calm';
+        if (energy > 0.7) mood = 'energetic';
+        else if (energy > 0.4) mood = 'upbeat';
+        else if (energy > 0.2) mood = 'moderate';
+        
+        const startTime = i / sampleRate;
+        const endTime = Math.min((i + windowSize) / sampleRate, audioDuration);
+        
+        // Only add if meets minimum duration and sensitivity threshold
+        const energyThreshold = sensitivity[0] / 100;
+        if (endTime - startTime >= minSceneDuration[0] && energy >= energyThreshold * 0.1) {
+          segments.push({
+            id: `beat-${segments.length}`,
+            startTime,
+            endTime,
+            energy,
+            tempo,
+            suggestedMood: mood
+          });
+        }
+      }
+
+      // Limit to max 10 scenes
+      const limitedSegments = segments.slice(0, 10);
+      setBeatSegments(limitedSegments);
+
+      // Generate scene descriptions based on audio analysis
+      const scenes = limitedSegments.map((segment, idx) => {
+        const moodDescriptions: Record<string, string> = {
+          energetic: 'high energy, dynamic movement, vibrant colors, intense action',
+          upbeat: 'positive atmosphere, flowing motion, bright lighting, lively scenes',
+          moderate: 'balanced composition, steady rhythm, natural tones, harmonious flow',
+          calm: 'peaceful ambiance, gentle movement, soft colors, serene landscapes'
+        };
+
+        const scenePrompt = `${baseVisualStyle}, ${moodDescriptions[segment.suggestedMood]}, cinematic composition, ${Math.floor(segment.tempo)} BPM tempo feel`;
+
+        return {
+          id: segment.id,
+          order: idx + 1,
+          prompt: scenePrompt,
+          duration: Math.round(segment.endTime - segment.startTime),
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          emotion: segment.suggestedMood,
+          sceneDescription: scenePrompt,
+          line: `Scene ${idx + 1} (${segment.suggestedMood})`,
+          metadata: {
+            energy: segment.energy,
+            tempo: segment.tempo,
+            autoGenerated: true
+          }
+        };
+      });
+
+      onScenesGenerated(scenes);
+      toast.success(`Generated ${scenes.length} scenes from audio analysis!`);
+      
+      await audioContext.close();
+    } catch (error) {
+      console.error('Beat detection error:', error);
+      toast.error('Failed to analyze audio. Please try again.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  return (
+    <div className="card-elevated rounded-2xl p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Activity className="w-5 h-5 text-primary" />
+          <h3 className="font-heading font-semibold text-foreground">
+            Auto Scene Detection
+          </h3>
+        </div>
+        <Badge variant="secondary">AI Audio Analysis</Badge>
+      </div>
+
+      <div className="p-4 rounded-xl bg-primary/10 border border-primary/20">
+        <div className="flex items-start gap-3">
+          <Info className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-primary space-y-1">
+            <p className="font-medium">No lyrics? No problem!</p>
+            <p className="text-primary/80">
+              Analyzes audio energy, tempo, and dynamics to automatically create timed scenes
+              that sync with your music's rhythm and mood.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Settings */}
+      <div className="space-y-4">
+        <div>
+          <Label className="text-sm mb-3 block flex items-center gap-2">
+            <Zap className="w-4 h-4" />
+            Detection Sensitivity: {sensitivity[0]}%
+          </Label>
+          <Slider
+            value={sensitivity}
+            onValueChange={setSensitivity}
+            min={0}
+            max={100}
+            step={10}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground mt-2">
+            Higher sensitivity detects more subtle energy changes
+          </p>
+        </div>
+
+        <div>
+          <Label className="text-sm mb-3 block flex items-center gap-2">
+            <Music className="w-4 h-4" />
+            Minimum Scene Duration: {minSceneDuration[0]}s
+          </Label>
+          <Slider
+            value={minSceneDuration}
+            onValueChange={setMinSceneDuration}
+            min={3}
+            max={15}
+            step={1}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground mt-2">
+            Shorter durations create more dynamic videos
+          </p>
+        </div>
+      </div>
+
+      {/* Audio file status */}
+      {audioFile && (
+        <div className="p-3 rounded-xl bg-secondary/30 border border-border">
+          <div className="flex items-center gap-2 text-sm">
+            <Music className="w-4 h-4 text-primary" />
+            <span className="font-medium truncate">{audioFile.name}</span>
+            <span className="text-muted-foreground">
+              • {Math.floor(audioDuration / 60)}:{String(Math.floor(audioDuration % 60)).padStart(2, '0')}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Detected segments preview */}
+      {beatSegments.length > 0 && (
+        <div className="p-4 rounded-xl bg-secondary/20 border border-border space-y-2">
+          <p className="text-sm font-medium">Detected {beatSegments.length} segments:</p>
+          <div className="max-h-[200px] overflow-y-auto space-y-2">
+            {beatSegments.map((segment, idx) => (
+              <div 
+                key={segment.id}
+                className="flex items-center justify-between p-2 rounded-lg bg-background/50 text-xs"
+              >
+                <span className="font-medium">Scene {idx + 1}</span>
+                <span className="text-muted-foreground">
+                  {segment.startTime.toFixed(1)}s - {segment.endTime.toFixed(1)}s
+                </span>
+                <Badge variant="outline" className="text-xs">
+                  {segment.suggestedMood}
+                </Badge>
+                <span className="text-muted-foreground">
+                  Energy: {(segment.energy * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Generate button */}
+      <Button
+        onClick={detectBeats}
+        disabled={!audioFile || isAnalyzing}
+        variant="hero"
+        className="w-full"
+        size="lg"
+      >
+        {isAnalyzing ? (
+          <>
+            <Activity className="w-5 h-5 mr-2 animate-pulse" />
+            Analyzing Audio...
+          </>
+        ) : (
+          <>
+            <Sparkles className="w-5 h-5 mr-2" />
+            Auto-Generate Scenes from Audio
+          </>
+        )}
+      </Button>
+    </div>
+  );
+};

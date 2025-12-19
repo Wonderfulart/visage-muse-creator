@@ -1,6 +1,6 @@
 // VeoStudio Pro - Main Generator Page
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown, Scissors, Volume2, BookOpen, Shield } from "lucide-react";
+import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown, Scissors, Volume2, BookOpen, Shield, Activity, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -11,14 +11,16 @@ import { PromptInput } from "@/components/PromptInput";
 import { LyricsInput } from "@/components/LyricsInput";
 import { VideoSettings } from "@/components/VideoSettings";
 import { GenerationStatus } from "@/components/GenerationStatus";
-import { VideoGallery } from "@/components/VideoGallery";
+import { EnhancedVideoGallery } from "@/components/EnhancedVideoGallery";
 import { TemplateSelector } from "@/components/TemplateSelector";
 import { BatchGenerationPanel } from "@/components/BatchGenerationPanel";
 import { CoverArtGenerator } from "@/components/CoverArtGenerator";
 import { SafetyAnalyzer } from "@/components/SafetyAnalyzer";
-import { LyricsToVideoSync } from "@/components/LyricsToVideoSync";
+import { EnhancedLyricsToVideoSync } from "@/components/EnhancedLyricsToVideoSync";
 import { StitchVideos } from "@/components/StitchVideos";
 import { AudioEditor } from "@/components/AudioEditor";
+import { AudioBeatDetector } from "@/components/AudioBeatDetector";
+import { AudioWaveformTimeline } from "@/components/AudioWaveformTimeline";
 import { AuthButton } from "@/components/AuthButton";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useNavigate, Link } from "react-router-dom";
@@ -28,7 +30,7 @@ import { PromptGuide } from "@/components/PromptGuide";
 import { useAdmin } from "@/hooks/useAdmin";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
-type GenerationMode = "single" | "batch" | "lyrics-sync" | "stitch" | "audio";
+type GenerationMode = "single" | "batch" | "lyrics-sync" | "auto-detect" | "timeline" | "stitch" | "audio";
 type FaceConsistencyLevel = "strict" | "moderate" | "loose";
 
 const Index = () => {
@@ -59,8 +61,28 @@ const Index = () => {
   const [batchStatus, setBatchStatus] = useState<"idle" | "generating" | "polling" | "completed">("idle");
   const [lyricsScenes, setLyricsScenes] = useState<any[]>([]);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string>("");
+  const [generatedScenes, setGeneratedScenes] = useState<any[]>([]);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number | null>(null);
+
+  // Handle audio loaded from EnhancedLyricsToVideoSync
+  const handleAudioLoadedFromLyrics = (duration: number, file: File) => {
+    setAudioDuration(duration);
+    setAudioFile(file);
+    const url = URL.createObjectURL(file);
+    setAudioUrl(url);
+  };
+
+  // Cleanup audio URL on unmount
+  useEffect(() => {
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+  }, [audioUrl]);
 
   // Batch generation handler
   const handleBatchGenerate = async () => {
@@ -434,7 +456,7 @@ const Index = () => {
 
           {/* Generation Mode Tabs */}
           <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as GenerationMode)} className="mb-8">
-            <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+            <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
               <TabsTrigger value="single" className="gap-2">
                 <Sparkles className="w-4 h-4" />
                 <span className="hidden sm:inline">Quick</span>
@@ -446,6 +468,14 @@ const Index = () => {
               <TabsTrigger value="lyrics-sync" className="gap-2">
                 <Music className="w-4 h-4" />
                 <span className="hidden sm:inline">Lyrics</span>
+              </TabsTrigger>
+              <TabsTrigger value="auto-detect" className="gap-2">
+                <Activity className="w-4 h-4" />
+                <span className="hidden sm:inline">Auto</span>
+              </TabsTrigger>
+              <TabsTrigger value="timeline" className="gap-2">
+                <Clock className="w-4 h-4" />
+                <span className="hidden sm:inline">Timeline</span>
               </TabsTrigger>
               <TabsTrigger value="stitch" className="gap-2">
                 <Scissors className="w-4 h-4" />
@@ -704,18 +734,20 @@ const Index = () => {
                     />
                   )}
 
-                  {/* Lyrics to Video Sync */}
-                  <LyricsToVideoSync
+                  {/* Enhanced Lyrics to Video Sync */}
+                  <EnhancedLyricsToVideoSync
                     lyrics={lyrics}
                     baseVisualStyle={prompt}
                     audioDuration={audioDuration || undefined}
                     onScenesGenerated={(scenes) => {
                       setLyricsScenes(scenes);
+                      setGeneratedScenes(scenes);
                       console.log("Lyrics scenes:", scenes);
                       toast.success(`Generated ${scenes.length} synced scenes!`);
                     }}
                     onGenerateBatch={handleLyricsSyncGenerate}
                     onRegenerateScene={handleRegenerateScene}
+                    onAudioLoaded={handleAudioLoadedFromLyrics}
                   />
 
                   {/* Batch Progress for Lyrics Sync */}
@@ -756,6 +788,52 @@ const Index = () => {
                   )}
                 </div>
               </div>
+            </TabsContent>
+
+            {/* Auto Detect Mode */}
+            <TabsContent value="auto-detect" className="space-y-6 mt-6">
+              <div className="grid lg:grid-cols-2 gap-6">
+                <div className="space-y-6">
+                  {/* Reference Image */}
+                  <div className="card-elevated rounded-2xl p-6">
+                    <ReferenceImageUpload onImageChange={setReferenceImage} aspectRatio={aspectRatio} />
+                  </div>
+
+                  {/* Base Visual Style */}
+                  <div className="card-elevated rounded-2xl p-6">
+                    <PromptInput value={prompt} onChange={setPrompt} />
+                    <p className="text-xs text-muted-foreground mt-2">
+                      This will be your base visual style for all auto-detected scenes
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  {/* Audio Beat Detector */}
+                  <AudioBeatDetector
+                    audioFile={audioFile}
+                    audioUrl={audioUrl}
+                    audioDuration={audioDuration || 0}
+                    baseVisualStyle={prompt}
+                    onScenesGenerated={(scenes) => {
+                      setGeneratedScenes(scenes);
+                      toast.success(`Detected ${scenes.length} scenes from audio!`);
+                    }}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Timeline Mode */}
+            <TabsContent value="timeline" className="space-y-6 mt-6">
+              <AudioWaveformTimeline
+                audioUrl={audioUrl}
+                scenes={generatedScenes}
+                audioDuration={audioDuration || 0}
+                onSceneClick={(scene) => {
+                  console.log("Scene clicked:", scene);
+                }}
+              />
             </TabsContent>
 
             {/* Stitch Mode */}
@@ -801,7 +879,7 @@ const Index = () => {
 
           {/* Video History Gallery */}
           <div className="mt-12">
-            <VideoGallery refreshTrigger={galleryRefresh} />
+            <EnhancedVideoGallery refreshTrigger={galleryRefresh} />
           </div>
         </div>
       </main>
