@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Clapperboard, Mail, Lock, AlertCircle, ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
-import { z } from 'zod';
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { Clapperboard, Mail, Lock, AlertCircle, ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+import { z } from "zod";
 
-const emailSchema = z.string().email('Please enter a valid email address');
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
+const emailSchema = z.string().email("Please enter a valid email address");
+const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
 
 const GoogleIcon = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -32,83 +32,104 @@ const GoogleIcon = () => (
   </svg>
 );
 
-type AuthMode = 'login' | 'signup' | 'forgot-password';
+type AuthMode = "login" | "signup" | "forgot-password";
 
 const Auth = () => {
-  const [mode, setMode] = useState<AuthMode>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
-  
+
   const { user, signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
-      navigate('/app');
+      navigate("/app", { replace: true });
     }
   }, [user, navigate]);
 
-  const validateForm = () => {
+  const validateForm = useCallback(() => {
     const newErrors: { email?: string; password?: string } = {};
-    
+
     const emailResult = emailSchema.safeParse(email);
     if (!emailResult.success) {
       newErrors.email = emailResult.error.errors[0].message;
     }
-    
-    if (mode !== 'forgot-password') {
+
+    if (mode !== "forgot-password") {
       const passwordResult = passwordSchema.safeParse(password);
       if (!passwordResult.success) {
         newErrors.password = passwordResult.error.errors[0].message;
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  }, [email, password, mode]);
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    if (errors.email) {
+      setErrors((prev) => ({ ...prev, email: undefined }));
+    }
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+    if (errors.password) {
+      setErrors((prev) => ({ ...prev, password: undefined }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
-    
+
     setLoading(true);
-    
+
     try {
-      if (mode === 'forgot-password') {
+      if (mode === "forgot-password") {
         const { error } = await resetPassword(email);
         if (error) {
           toast.error(error.message);
         } else {
-          toast.success('Password reset email sent! Check your inbox.');
-          setMode('login');
+          toast.success("Password reset email sent! Check your inbox.");
+          setEmail("");
+          setPassword("");
+          setMode("login");
         }
-      } else if (mode === 'login') {
+      } else if (mode === "login") {
         const { error } = await signIn(email, password);
         if (error) {
-          if (error.message.includes('Invalid login credentials')) {
-            toast.error('Invalid email or password');
+          if (error.message.includes("Invalid login credentials")) {
+            toast.error("Invalid email or password");
           } else {
             toast.error(error.message);
           }
         } else {
-          toast.success('Welcome back!');
+          toast.success("Welcome back!");
+          // Navigation handled by useEffect
         }
       } else {
         const { error } = await signUp(email, password);
         if (error) {
-          if (error.message.includes('already registered')) {
-            toast.error('This email is already registered. Try logging in instead.');
+          if (error.message.includes("already registered")) {
+            toast.error("This email is already registered. Try logging in instead.");
           } else {
             toast.error(error.message);
           }
         } else {
-          toast.success('Account created! You can now use VeoStudio.');
+          toast.success("Account created! You can now use VeoStudio.");
+          // Navigation handled by useEffect
         }
       }
+    } catch (error) {
+      toast.error("An unexpected error occurred. Please try again.");
+      console.error("Auth error:", error);
     } finally {
       setLoading(false);
     }
@@ -117,22 +138,42 @@ const Auth = () => {
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     try {
-      const { error } = await signInWithGoogle();
-      if (error) {
-        toast.error(error.message);
-      }
-    } finally {
+      // signInWithGoogle will redirect, so we won't reach the code after this
+      // if successful. Only errors that happen before redirect will be caught.
+      await signInWithGoogle();
+      // If we reach here without redirect, something went wrong
+      // The actual success will be handled after OAuth redirect completes
+    } catch (error: any) {
+      // Only catch errors that prevent the redirect from starting
+      toast.error(error?.message || "Failed to start Google sign in");
       setGoogleLoading(false);
+    }
+    // Note: setGoogleLoading(false) in finally would never run on success
+    // because the page redirects. Only run it in catch for actual errors.
+  };
+
+  const handleModeChange = (newMode: AuthMode) => {
+    setMode(newMode);
+    setErrors({});
+    if (newMode !== mode) {
+      // Optionally clear fields when switching modes
+      // setEmail('');
+      // setPassword('');
     }
   };
 
   const getTitle = () => {
     switch (mode) {
-      case 'forgot-password': return 'Reset your password';
-      case 'signup': return 'Create a new account';
-      default: return 'Sign in to your account';
+      case "forgot-password":
+        return "Reset your password";
+      case "signup":
+        return "Create a new account";
+      default:
+        return "Sign in to your account";
     }
   };
+
+  const isFormDisabled = loading || googleLoading;
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -150,24 +191,27 @@ const Auth = () => {
 
         {/* Form Card */}
         <div className="card-elevated rounded-2xl p-8">
-          {mode === 'forgot-password' ? (
+          {mode === "forgot-password" ? (
             <>
               <button
                 type="button"
-                onClick={() => setMode('login')}
+                onClick={() => handleModeChange("login")}
                 className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors"
+                disabled={isFormDisabled}
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back to sign in
               </button>
-              
+
               <p className="text-sm text-muted-foreground mb-6">
                 Enter your email address and we'll send you a link to reset your password.
               </p>
 
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-foreground">Email</Label>
+                  <Label htmlFor="email" className="text-foreground">
+                    Email
+                  </Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
@@ -175,8 +219,10 @@ const Auth = () => {
                       type="email"
                       placeholder="you@example.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={handleEmailChange}
                       className="pl-10"
+                      disabled={isFormDisabled}
+                      autoComplete="email"
                     />
                   </div>
                   {errors.email && (
@@ -187,16 +233,11 @@ const Auth = () => {
                   )}
                 </div>
 
-                <Button
-                  type="submit"
-                  variant="hero"
-                  className="w-full"
-                  disabled={loading}
-                >
+                <Button type="submit" variant="hero" className="w-full" disabled={isFormDisabled}>
                   {loading ? (
                     <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
                   ) : (
-                    'Send Reset Link'
+                    "Send Reset Link"
                   )}
                 </Button>
               </form>
@@ -209,7 +250,7 @@ const Auth = () => {
                 variant="outline"
                 className="w-full mb-6 gap-3"
                 onClick={handleGoogleSignIn}
-                disabled={googleLoading}
+                disabled={isFormDisabled}
               >
                 {googleLoading ? (
                   <div className="w-5 h-5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
@@ -231,7 +272,9 @@ const Auth = () => {
 
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-foreground">Email</Label>
+                  <Label htmlFor="email" className="text-foreground">
+                    Email
+                  </Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
@@ -239,8 +282,10 @@ const Auth = () => {
                       type="email"
                       placeholder="you@example.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={handleEmailChange}
                       className="pl-10"
+                      disabled={isFormDisabled}
+                      autoComplete="email"
                     />
                   </div>
                   {errors.email && (
@@ -253,15 +298,15 @@ const Auth = () => {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="password" className="text-foreground">Password</Label>
-                    {mode === 'login' && (
+                    <Label htmlFor="password" className="text-foreground">
+                      Password
+                    </Label>
+                    {mode === "login" && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setMode('forgot-password');
-                          setErrors({});
-                        }}
+                        onClick={() => handleModeChange("forgot-password")}
                         className="text-xs text-primary hover:underline"
+                        disabled={isFormDisabled}
                       >
                         Forgot password?
                       </button>
@@ -274,8 +319,10 @@ const Auth = () => {
                       type="password"
                       placeholder="••••••••"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={handlePasswordChange}
                       className="pl-10"
+                      disabled={isFormDisabled}
+                      autoComplete={mode === "login" ? "current-password" : "new-password"}
                     />
                   </div>
                   {errors.password && (
@@ -286,18 +333,13 @@ const Auth = () => {
                   )}
                 </div>
 
-                <Button
-                  type="submit"
-                  variant="hero"
-                  className="w-full"
-                  disabled={loading}
-                >
+                <Button type="submit" variant="hero" className="w-full" disabled={isFormDisabled}>
                   {loading ? (
                     <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                  ) : mode === 'login' ? (
-                    'Sign In'
+                  ) : mode === "login" ? (
+                    "Sign In"
                   ) : (
-                    'Create Account'
+                    "Create Account"
                   )}
                 </Button>
               </form>
@@ -305,16 +347,12 @@ const Auth = () => {
               <div className="mt-6 text-center">
                 <button
                   type="button"
-                  onClick={() => {
-                    setMode(mode === 'login' ? 'signup' : 'login');
-                    setErrors({});
-                  }}
+                  onClick={() => handleModeChange(mode === "login" ? "signup" : "login")}
                   className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  disabled={isFormDisabled}
                 >
-                  {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-                  <span className="text-primary font-medium">
-                    {mode === 'login' ? 'Sign up' : 'Sign in'}
-                  </span>
+                  {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+                  <span className="text-primary font-medium">{mode === "login" ? "Sign up" : "Sign in"}</span>
                 </button>
               </div>
             </>
