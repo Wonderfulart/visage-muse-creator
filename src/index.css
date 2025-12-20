@@ -109,6 +109,21 @@
     border: 1px solid rgba(255, 255, 255, 0.12);
   }
 
+  /* Sora/Hedra Dark Theme Enhancement */
+  .bg-sora {
+    background: linear-gradient(180deg, hsl(0 0% 2%) 0%, hsl(0 0% 4%) 100%);
+  }
+
+  .bg-sora-card {
+    background: hsl(0 0% 6% / 0.8);
+    border: 1px solid hsl(0 0% 12% / 0.5);
+  }
+
+  .bg-sora-elevated {
+    background: hsl(0 0% 8% / 0.9);
+    border: 1px solid hsl(0 0% 15% / 0.5);
+  }
+
   /* Rainbow Text */
   .text-rainbow {
     background: var(--gradient-rainbow-horizontal);
@@ -157,6 +172,15 @@
     box-shadow: 0 0 15px -3px hsl(var(--glow-primary) / 0.3);
   }
 
+  /* Sora-style subtle glow on hover */
+  .glow-hover {
+    transition: box-shadow 0.3s ease;
+  }
+
+  .glow-hover:hover {
+    box-shadow: 0 0 20px -5px hsl(var(--primary) / 0.3);
+  }
+
   /* Glass Cards */
   .card-rainbow {
     background: rgba(255, 255, 255, 0.03);
@@ -172,6 +196,18 @@
 
   .card-elevated {
     @apply bg-glass rounded-2xl;
+  }
+
+  /* Sora-style compact card */
+  .card-sora {
+    background: hsl(0 0% 7% / 0.6);
+    border: 1px solid hsl(0 0% 15% / 0.4);
+    transition: all 0.2s ease;
+  }
+
+  .card-sora:hover {
+    background: hsl(0 0% 9% / 0.8);
+    border-color: hsl(0 0% 20% / 0.5);
   }
 
   /* Glass Buttons */
@@ -194,6 +230,38 @@
       0 20px 60px -15px hsl(180 55% 75% / 0.2);
   }
 
+  /* Sora-style minimal button */
+  .btn-sora {
+    background: hsl(0 0% 12%);
+    border: 1px solid hsl(0 0% 20%);
+    color: hsl(0 0% 90%);
+    transition: all 0.2s ease;
+  }
+
+  .btn-sora:hover {
+    background: hsl(0 0% 16%);
+    border-color: hsl(0 0% 25%);
+  }
+
+  /* Scrollbar for Sora style */
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Timeline specific */
+  .timeline-track {
+    background: linear-gradient(90deg, 
+      hsl(0 0% 8%) 0%, 
+      hsl(0 0% 10%) 50%, 
+      hsl(0 0% 8%) 100%
+    );
+  }
+
   /* Animations */
   .animate-fade-in {
     animation: fadeIn 0.5s ease-out forwards;
@@ -205,6 +273,10 @@
 
   .animate-pulse-glow {
     animation: pulseGlow 2s ease-in-out infinite;
+  }
+
+  .animate-shimmer {
+    animation: shimmer 2s linear infinite;
   }
 }
 
@@ -236,6 +308,11 @@
   50% {
     box-shadow: 0 0 40px -5px hsl(var(--glow-primary) / 0.6);
   }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 /* Custom scrollbar */

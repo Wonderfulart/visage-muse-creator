@@ -1,29 +1,23 @@
-import { useState, useCallback } from "react";
-import { Settings, Music, Clock, Wand2, Check, Sparkles, Loader2 } from "lucide-react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { Settings, X, Wand2, Sparkles, Loader2, Download, Music } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
 import { SetupPanel } from "./SetupPanel";
 import { AudioUploadPanel } from "./AudioUploadPanel";
-import { TimelinePanel } from "./TimelinePanel";
-import { GenerationPanel } from "./GenerationPanel";
+import { SoraTimeline } from "./SoraTimeline";
+import { CompactSceneCard } from "./CompactSceneCard";
 import { Scene, StoryboardSettings, StoryboardStep } from "./types";
 import { AudioSegment } from "@/utils/audioSplitter";
-import { Button } from "@/components/ui/button";
+import { batchMergeAudioWithVideos, downloadMergedVideo } from "@/utils/audioVideoMerger";
 
 interface StoryboardEditorProps {
   onComplete?: () => void;
 }
 
-const STEPS: { id: StoryboardStep; label: string; icon: React.ElementType }[] = [
-  { id: "setup", label: "Setup", icon: Settings },
-  { id: "audio", label: "Audio", icon: Music },
-  { id: "timeline", label: "Timeline", icon: Clock },
-  { id: "generate", label: "Generate", icon: Wand2 },
-];
-
-/**
- * Generate fallback prompts based on base style and segment position (used when AI fails)
- */
 function generateFallbackPrompts(
   basePrompt: string,
   segments: AudioSegment[]
@@ -64,12 +58,50 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
   const [audioUrl, setAudioUrl] = useState("");
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeProgress, setMergeProgress] = useState<Record<string, number>>({});
+  const [completedCount, setCompletedCount] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [playingSceneId, setPlayingSceneId] = useState<string | null>(null);
 
-  const currentStepIndex = STEPS.findIndex((s) => s.id === currentStep);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const pollingIntervals = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
-  /**
-   * Generate AI-powered prompts for all scenes
-   */
+  const selectedScenes = scenes.filter((s) => s.selected);
+  const allCompleted = selectedScenes.length > 0 && selectedScenes.every((s) => s.status === "completed");
+  const anyGenerating = selectedScenes.some((s) => s.status === "generating");
+  const maxScenes = 10;
+
+  // Cleanup polling intervals
+  useEffect(() => {
+    return () => {
+      pollingIntervals.current.forEach((interval) => clearInterval(interval));
+    };
+  }, []);
+
+  // Audio time update
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setPlayingSceneId(null);
+    };
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("ended", handleEnded);
+
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("ended", handleEnded);
+    };
+  }, [audioUrl]);
+
   const generateAIPrompts = useCallback(async (currentScenes: Scene[]) => {
     if (!settings.basePrompt || currentScenes.length === 0) return;
 
@@ -125,10 +157,8 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
       setAudioFile(file);
       setAudioUrl(URL.createObjectURL(file));
 
-      // Generate fallback prompts first
       const fallbackPrompts = generateFallbackPrompts(settings.basePrompt, segments);
 
-      // Create scenes from segments
       const newScenes: Scene[] = segments.map((segment, i) => ({
         id: segment.id,
         index: i,
@@ -142,120 +172,480 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
       }));
 
       setScenes(newScenes);
-      
-      // Then trigger AI prompt generation in background
+      setCurrentStep("timeline");
       generateAIPrompts(newScenes);
     },
     [settings.basePrompt, generateAIPrompts]
   );
 
-  const goToStep = (step: StoryboardStep) => {
-    setCurrentStep(step);
+  const pollSceneStatus = useCallback((sceneId: string, requestId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("check-video-status", {
+          body: { requestId },
+        });
+
+        if (error) return;
+
+        if (data.status === "completed" && data.videoUrl) {
+          clearInterval(interval);
+          pollingIntervals.current.delete(sceneId);
+
+          setScenes(prev =>
+            prev.map((s) =>
+              s.id === sceneId ? { ...s, status: "completed", videoUrl: data.videoUrl } : s
+            )
+          );
+
+          setCompletedCount((prev) => prev + 1);
+          toast.success(`Scene completed!`);
+        } else if (data.status === "failed") {
+          clearInterval(interval);
+          pollingIntervals.current.delete(sceneId);
+
+          setScenes(prev =>
+            prev.map((s) =>
+              s.id === sceneId ? { ...s, status: "failed" } : s
+            )
+          );
+
+          toast.error(`Scene failed`);
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    }, 5000);
+
+    pollingIntervals.current.set(sceneId, interval);
+  }, []);
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    setCompletedCount(0);
+
+    setScenes(prev =>
+      prev.map((s) =>
+        s.selected ? { ...s, status: "generating" } : s
+      )
+    );
+
+    try {
+      const scenesToGenerate = selectedScenes.map((scene) => ({
+        id: scene.id,
+        order: scene.index + 1,
+        prompt: scene.prompt,
+        duration: Math.min(Math.max(scene.duration, 5), 8),
+      }));
+
+      const { data, error } = await supabase.functions.invoke("generate-batch-videos", {
+        body: {
+          scenes: scenesToGenerate,
+          referenceImage: settings.referenceImage,
+          preserveFace: settings.preserveFace,
+          aspectRatio: settings.aspectRatio,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.operations) {
+        setScenes(prev => prev.map((scene) => {
+          const operation = data.operations.find(
+            (op: any) => op.sceneId === scene.id || op.order === scene.index + 1
+          );
+
+          if (operation?.success && operation.requestId) {
+            pollSceneStatus(scene.id, operation.requestId);
+            return { ...scene, requestId: operation.requestId };
+          }
+
+          return scene;
+        }));
+
+        toast.success(`Started generating ${data.successCount} scenes!`);
+      }
+    } catch (error) {
+      console.error("Generation error:", error);
+      toast.error("Failed to start generation");
+
+      setScenes(prev =>
+        prev.map((s) =>
+          s.selected ? { ...s, status: "pending" } : s
+        )
+      );
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handleComplete = () => {
-    toast.success("Storyboard complete! Check your gallery for videos.");
-    onComplete?.();
+  const handleApplyAudio = async () => {
+    if (!audioFile) return;
+
+    setIsMerging(true);
+    const scenesToMerge = selectedScenes.filter((s) => s.videoUrl);
+
+    try {
+      const results = await batchMergeAudioWithVideos(
+        scenesToMerge.map((s) => ({
+          id: s.id,
+          videoUrl: s.videoUrl!,
+          startTime: s.startTime,
+          endTime: s.endTime,
+        })),
+        audioFile,
+        (sceneId, progress) => {
+          setMergeProgress((prev) => ({ ...prev, [sceneId]: progress }));
+        }
+      );
+
+      // Download merged videos
+      results.forEach((result, i) => {
+        downloadMergedVideo(result.blob, `scene-${i + 1}-with-audio.webm`);
+      });
+
+      toast.success(`${results.length} videos merged with audio!`);
+    } catch (error) {
+      console.error("Merge error:", error);
+      toast.error("Failed to merge audio");
+    } finally {
+      setIsMerging(false);
+      setMergeProgress({});
+    }
   };
+
+  const retryFailedScene = async (scene: Scene) => {
+    setScenes(prev =>
+      prev.map((s) =>
+        s.id === scene.id ? { ...s, status: "generating" } : s
+      )
+    );
+
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-batch-videos", {
+        body: {
+          scenes: [{
+            id: scene.id,
+            order: scene.index + 1,
+            prompt: scene.prompt,
+            duration: Math.min(Math.max(scene.duration, 5), 8),
+          }],
+          referenceImage: settings.referenceImage,
+          preserveFace: settings.preserveFace,
+          aspectRatio: settings.aspectRatio,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.operations?.[0]?.success) {
+        pollSceneStatus(scene.id, data.operations[0].requestId);
+        setScenes(prev =>
+          prev.map((s) =>
+            s.id === scene.id ? { ...s, requestId: data.operations[0].requestId } : s
+          )
+        );
+        toast.success(`Retrying scene ${scene.index + 1}`);
+      } else {
+        throw new Error(data.operations?.[0]?.error || "Failed to retry");
+      }
+    } catch (error) {
+      console.error("Retry error:", error);
+      setScenes(prev =>
+        prev.map((s) =>
+          s.id === scene.id ? { ...s, status: "failed" } : s
+        )
+      );
+      toast.error(`Failed to retry scene ${scene.index + 1}`);
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const scene = scenes.find((s) => s.id === id);
+    if (!scene) return;
+
+    if (!scene.selected && selectedScenes.length >= maxScenes) {
+      toast.error(`Maximum ${maxScenes} scenes can be selected`);
+      return;
+    }
+
+    setScenes(prev =>
+      prev.map((s) => (s.id === id ? { ...s, selected: !s.selected } : s))
+    );
+  };
+
+  const updatePrompt = (id: string, prompt: string) => {
+    setScenes(prev =>
+      prev.map((s) => (s.id === id ? { ...s, prompt } : s))
+    );
+  };
+
+  const playSceneAudio = (scene: Scene) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (playingSceneId === scene.id) {
+      audio.pause();
+      setPlayingSceneId(null);
+      setIsPlaying(false);
+    } else {
+      audio.currentTime = scene.startTime;
+      audio.play();
+      setPlayingSceneId(scene.id);
+      setIsPlaying(true);
+
+      const checkEnd = setInterval(() => {
+        if (audio.currentTime >= scene.endTime) {
+          audio.pause();
+          clearInterval(checkEnd);
+          setPlayingSceneId(null);
+          setIsPlaying(false);
+        }
+      }, 100);
+    }
+  };
+
+  const handleSeek = (time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
+  };
+
+  const togglePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const downloadAll = () => {
+    selectedScenes
+      .filter((s) => s.videoUrl)
+      .forEach((scene) => {
+        const link = document.createElement("a");
+        link.href = scene.videoUrl!;
+        link.download = `scene-${scene.index + 1}.mp4`;
+        link.click();
+      });
+  };
+
+  const hasAudio = audioUrl && scenes.length > 0;
 
   return (
-    <div className="space-y-8">
-      {/* Step Indicator */}
-      <div className="flex items-center justify-center">
-        <div className="flex items-center gap-2">
-          {STEPS.map((step, i) => {
-            const Icon = step.icon;
-            const isActive = step.id === currentStep;
-            const isCompleted = i < currentStepIndex;
-
-            return (
-              <div key={step.id} className="flex items-center">
-                <button
-                  onClick={() => {
-                    if (isCompleted) goToStep(step.id);
-                  }}
-                  disabled={!isCompleted && !isActive}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : isCompleted
-                      ? "bg-primary/20 text-primary hover:bg-primary/30 cursor-pointer"
-                      : "bg-secondary text-muted-foreground"
-                  }`}
-                >
-                  {isCompleted ? (
-                    <Check className="w-4 h-4" />
-                  ) : (
-                    <Icon className="w-4 h-4" />
-                  )}
-                  <span className="text-sm font-medium hidden sm:inline">{step.label}</span>
-                </button>
-
-                {i < STEPS.length - 1 && (
-                  <div
-                    className={`w-8 h-0.5 mx-1 ${
-                      isCompleted ? "bg-primary" : "bg-border"
-                    }`}
-                  />
-                )}
+    <div className="min-h-screen bg-background pb-40">
+      {/* Header Bar */}
+      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-xl border-b border-border/50">
+        <div className="max-w-screen-2xl mx-auto px-4 h-14 flex items-center justify-between">
+          {/* Left: Settings */}
+          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="sm" className="gap-2">
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-full sm:max-w-xl overflow-y-auto">
+              <SheetHeader>
+                <SheetTitle>Project Settings</SheetTitle>
+              </SheetHeader>
+              <div className="mt-6">
+                <SetupPanel
+                  settings={settings}
+                  onSettingsChange={setSettings}
+                  onNext={() => setSettingsOpen(false)}
+                />
               </div>
-            );
-          })}
+            </SheetContent>
+          </Sheet>
+
+          {/* Center: Status */}
+          <div className="flex items-center gap-3">
+            {isGeneratingPrompts && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="hidden sm:inline">Generating AI prompts...</span>
+              </div>
+            )}
+            {anyGenerating && (
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-muted-foreground">
+                  Generating {completedCount}/{selectedScenes.length}
+                </span>
+              </div>
+            )}
+            {isMerging && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Merging audio...</span>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2">
+            {hasAudio && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => generateAIPrompts(scenes)}
+                disabled={isGeneratingPrompts}
+              >
+                {isGeneratingPrompts ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+                <span className="ml-2 hidden sm:inline">AI Prompts</span>
+              </Button>
+            )}
+            
+            {allCompleted && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleApplyAudio}
+                  disabled={isMerging}
+                >
+                  <Music className="w-4 h-4" />
+                  <span className="ml-2 hidden sm:inline">
+                    {isMerging ? "Merging..." : "Apply Audio"}
+                  </span>
+                </Button>
+                <Button variant="outline" size="sm" onClick={downloadAll}>
+                  <Download className="w-4 h-4" />
+                  <span className="ml-2 hidden sm:inline">Download All</span>
+                </Button>
+              </>
+            )}
+
+            {hasAudio && !allCompleted && !anyGenerating && (
+              <Button
+                onClick={handleGenerate}
+                size="sm"
+                className="bg-primary hover:bg-primary/90"
+              >
+                <Wand2 className="w-4 h-4 mr-2" />
+                Generate {selectedScenes.length}
+              </Button>
+            )}
+
+            {allCompleted && (
+              <Button onClick={onComplete} size="sm" className="bg-green-600 hover:bg-green-700">
+                Finish
+              </Button>
+            )}
+          </div>
         </div>
+
+        {/* Progress Bar */}
+        {anyGenerating && (
+          <div className="px-4 pb-2">
+            <Progress value={(completedCount / selectedScenes.length) * 100} className="h-1" />
+          </div>
+        )}
       </div>
 
-      {/* AI Prompt Generation Status */}
-      {isGeneratingPrompts && (
-        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          <span>Generating AI prompts for scenes...</span>
-        </div>
-      )}
-
-      {/* Step Content */}
-      <div className="min-h-[500px]">
-        {currentStep === "setup" && (
-          <SetupPanel
-            settings={settings}
-            onSettingsChange={setSettings}
-            onNext={() => goToStep("audio")}
-          />
+      {/* Main Content */}
+      <div className="max-w-screen-2xl mx-auto px-4 py-6">
+        {currentStep === "setup" && !hasAudio && (
+          <div className="space-y-6">
+            <SetupPanel
+              settings={settings}
+              onSettingsChange={setSettings}
+              onNext={() => setCurrentStep("audio")}
+            />
+          </div>
         )}
 
-        {currentStep === "audio" && (
+        {currentStep === "audio" && !hasAudio && (
           <AudioUploadPanel
             clipDuration={settings.clipDuration}
             onAudioProcessed={handleAudioProcessed}
-            onNext={() => goToStep("timeline")}
-            onBack={() => goToStep("setup")}
+            onNext={() => setCurrentStep("timeline")}
+            onBack={() => setCurrentStep("setup")}
           />
         )}
 
-        {currentStep === "timeline" && (
-          <TimelinePanel
-            scenes={scenes}
-            fullWaveform={fullWaveform}
-            audioDuration={audioDuration}
-            audioUrl={audioUrl}
-            onScenesChange={setScenes}
-            onNext={() => goToStep("generate")}
-            onBack={() => goToStep("audio")}
-            onRegeneratePrompts={() => generateAIPrompts(scenes)}
-            isGeneratingPrompts={isGeneratingPrompts}
-          />
-        )}
+        {/* Timeline View - Film Strip Style */}
+        {hasAudio && (
+          <div className="space-y-6">
+            {/* Scene Strip */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-foreground">
+                  Scenes
+                  <span className="ml-2 text-muted-foreground">
+                    ({selectedScenes.length}/{maxScenes} selected)
+                  </span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setScenes(prev => prev.map(s => ({ ...s, selected: false })))}
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setScenes(prev => prev.map((s, i) => ({ ...s, selected: i < maxScenes })))}
+                  >
+                    Select First 10
+                  </Button>
+                </div>
+              </div>
 
-        {currentStep === "generate" && (
-          <GenerationPanel
-            scenes={scenes}
-            settings={settings}
-            audioUrl={audioUrl}
-            onScenesChange={setScenes}
-            onBack={() => goToStep("timeline")}
-            onComplete={handleComplete}
-          />
+              <ScrollArea className="w-full">
+                <div className="flex gap-3 pb-4">
+                  {scenes.map((scene) => (
+                    <CompactSceneCard
+                      key={scene.id}
+                      scene={scene}
+                      onToggleSelect={toggleSelect}
+                      onUpdatePrompt={updatePrompt}
+                      onPlayAudio={playSceneAudio}
+                      onRetry={retryFailedScene}
+                      isPlaying={playingSceneId === scene.id}
+                      disabled={!scene.selected && selectedScenes.length >= maxScenes}
+                      showVideo={scene.status === "completed"}
+                    />
+                  ))}
+                </div>
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
+            </div>
+          </div>
         )}
       </div>
+
+      {/* Hidden audio element */}
+      {audioUrl && <audio ref={audioRef} src={audioUrl} />}
+
+      {/* Sora-style Timeline */}
+      {hasAudio && (
+        <SoraTimeline
+          scenes={scenes}
+          fullWaveform={fullWaveform}
+          audioDuration={audioDuration}
+          audioUrl={audioUrl}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
+          onSeek={handleSeek}
+          onPlayPause={togglePlayPause}
+          onSceneClick={(scene) => {
+            handleSeek(scene.startTime);
+            toggleSelect(scene.id);
+          }}
+        />
+      )}
     </div>
   );
 }
