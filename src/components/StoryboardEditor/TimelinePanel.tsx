@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Clock, Play, Pause, CheckSquare, Square, Wand2 } from "lucide-react";
+import { Clock, Play, Pause, CheckSquare, Square, Wand2, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Scene } from "./types";
@@ -14,6 +14,8 @@ interface TimelinePanelProps {
   onScenesChange: (scenes: Scene[]) => void;
   onNext: () => void;
   onBack: () => void;
+  onRegeneratePrompts?: () => void;
+  isGeneratingPrompts?: boolean;
 }
 
 export function TimelinePanel({
@@ -24,6 +26,8 @@ export function TimelinePanel({
   onScenesChange,
   onNext,
   onBack,
+  onRegeneratePrompts,
+  isGeneratingPrompts,
 }: TimelinePanelProps) {
   const [playingSceneId, setPlayingSceneId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -206,6 +210,19 @@ export function TimelinePanel({
         </div>
 
         <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={onRegeneratePrompts}
+            disabled={isGeneratingPrompts}
+          >
+            {isGeneratingPrompts ? (
+              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 mr-1" />
+            )}
+            AI Prompts
+          </Button>
           <Button variant="outline" size="sm" onClick={deselectAll}>
             <Square className="w-4 h-4 mr-1" />
             Clear
