@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Wand2, Download, Loader2, CheckCircle, XCircle, Music, Play, Pause } from "lucide-react";
+import { Wand2, Download, Loader2, CheckCircle, XCircle, Music, Play, Pause, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -154,7 +154,53 @@ export function GenerationPanel({
     setIsApplyingAudio(true);
     toast.info("Audio overlay feature coming soon - videos generated without audio for now");
     setIsApplyingAudio(false);
-    // TODO: Implement audio merge with edge function
+  };
+
+  const retryFailedScene = async (scene: Scene) => {
+    // Mark as generating
+    onScenesChange(
+      scenes.map((s) =>
+        s.id === scene.id ? { ...s, status: "generating" } : s
+      )
+    );
+
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-batch-videos", {
+        body: {
+          scenes: [{
+            id: scene.id,
+            order: scene.index + 1,
+            prompt: scene.prompt,
+            duration: Math.min(Math.max(scene.duration, 5), 8),
+          }],
+          referenceImage: settings.referenceImage,
+          preserveFace: settings.preserveFace,
+          aspectRatio: settings.aspectRatio,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.operations?.[0]?.success) {
+        pollSceneStatus(scene.id, data.operations[0].requestId);
+        onScenesChange(
+          scenes.map((s) =>
+            s.id === scene.id ? { ...s, requestId: data.operations[0].requestId } : s
+          )
+        );
+        toast.success(`Retrying scene ${scene.index + 1}`);
+      } else {
+        throw new Error(data.operations?.[0]?.error || "Failed to retry");
+      }
+    } catch (error) {
+      console.error("Retry error:", error);
+      onScenesChange(
+        scenes.map((s) =>
+          s.id === scene.id ? { ...s, status: "failed" } : s
+        )
+      );
+      toast.error(`Failed to retry scene ${scene.index + 1}`);
+    }
   };
 
   const playScene = (scene: Scene) => {
@@ -265,11 +311,22 @@ export function GenerationPanel({
                   </button>
                 </>
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
                   {scene.status === "generating" ? (
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                   ) : scene.status === "failed" ? (
-                    <XCircle className="w-8 h-8 text-destructive" />
+                    <>
+                      <XCircle className="w-6 h-6 text-destructive" />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => retryFailedScene(scene)}
+                        className="text-xs h-7"
+                      >
+                        <RefreshCw className="w-3 h-3 mr-1" />
+                        Retry
+                      </Button>
+                    </>
                   ) : (
                     <span className="text-3xl font-bold text-muted-foreground/20">
                       {scene.index + 1}
