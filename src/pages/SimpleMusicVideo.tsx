@@ -199,7 +199,7 @@ const SimpleMusicVideo = () => {
     }
   }, [mediaPreview, audioFile, audioDuration]);
 
-  // Upload file to Supabase storage
+  // Upload file to Supabase storage and return a signed URL
   const uploadToStorage = async (file: File | Blob, bucket: string, path: string): Promise<string> => {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) throw new Error("Not authenticated");
@@ -212,11 +212,15 @@ const SimpleMusicVideo = () => {
 
     if (uploadError) throw uploadError;
 
-    const { data: urlData } = supabase.storage
+    // Use signed URL instead of public URL for private buckets
+    // This allows external APIs (like Sync.so) to access the file temporarily
+    const { data: signedData, error: signedError } = await supabase.storage
       .from(bucket)
-      .getPublicUrl(filePath);
+      .createSignedUrl(filePath, 3600); // 1 hour expiry
 
-    return urlData.publicUrl;
+    if (signedError) throw signedError;
+
+    return signedData.signedUrl;
   };
 
   // Start generation for all segments
