@@ -1,6 +1,6 @@
 // VeoStudio Pro - Main Generator Page
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Clapperboard, Zap, Sparkles, Layers, Palette, FileText, Music, Crown, Scissors, Volume2, BookOpen, Shield, Activity, Clock } from "lucide-react";
+import { Clapperboard, Zap, Sparkles, Palette, Crown, Scissors, Shield, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -13,24 +13,19 @@ import { VideoSettings } from "@/components/VideoSettings";
 import { GenerationStatus } from "@/components/GenerationStatus";
 import { EnhancedVideoGallery } from "@/components/EnhancedVideoGallery";
 import { TemplateSelector } from "@/components/TemplateSelector";
-import { BatchGenerationPanel } from "@/components/BatchGenerationPanel";
 import { CoverArtGenerator } from "@/components/CoverArtGenerator";
 import { SafetyAnalyzer } from "@/components/SafetyAnalyzer";
-import { EnhancedLyricsToVideoSync } from "@/components/EnhancedLyricsToVideoSync";
 import { StitchVideos } from "@/components/StitchVideos";
-import { AudioEditor } from "@/components/AudioEditor";
-import { AudioBeatDetector } from "@/components/AudioBeatDetector";
-import { AudioWaveformTimeline } from "@/components/AudioWaveformTimeline";
 import { AuthButton } from "@/components/AuthButton";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useNavigate, Link } from "react-router-dom";
-import { GenerationTimeEstimator } from "@/components/GenerationTimeEstimator";
 import { PromptSafetyChecker } from "@/components/PromptSafetyChecker";
 import { PromptGuide } from "@/components/PromptGuide";
 import { useAdmin } from "@/hooks/useAdmin";
+import StoryboardEditor from "@/components/StoryboardEditor";
 
 type GenerationStatusType = "idle" | "processing" | "completed" | "failed";
-type GenerationMode = "single" | "batch" | "lyrics-sync" | "auto-detect" | "timeline" | "stitch" | "audio";
+type GenerationMode = "single" | "storyboard" | "stitch";
 type FaceConsistencyLevel = "strict" | "moderate" | "loose";
 
 const Index = () => {
@@ -454,36 +449,20 @@ const Index = () => {
             </p>
           </div>
 
-          {/* Generation Mode Tabs */}
+          {/* Generation Mode Tabs - Simplified to 3 */}
           <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as GenerationMode)} className="mb-8">
-            <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
+            <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid max-w-md mx-auto">
               <TabsTrigger value="single" className="gap-2">
                 <Sparkles className="w-4 h-4" />
                 <span className="hidden sm:inline">Quick</span>
               </TabsTrigger>
-              <TabsTrigger value="batch" className="gap-2">
-                <Layers className="w-4 h-4" />
-                <span className="hidden sm:inline">Batch</span>
-              </TabsTrigger>
-              <TabsTrigger value="lyrics-sync" className="gap-2">
-                <Music className="w-4 h-4" />
-                <span className="hidden sm:inline">Lyrics</span>
-              </TabsTrigger>
-              <TabsTrigger value="auto-detect" className="gap-2">
-                <Activity className="w-4 h-4" />
-                <span className="hidden sm:inline">Auto</span>
-              </TabsTrigger>
-              <TabsTrigger value="timeline" className="gap-2">
-                <Clock className="w-4 h-4" />
-                <span className="hidden sm:inline">Timeline</span>
+              <TabsTrigger value="storyboard" className="gap-2">
+                <Film className="w-4 h-4" />
+                <span className="hidden sm:inline">Storyboard</span>
               </TabsTrigger>
               <TabsTrigger value="stitch" className="gap-2">
                 <Scissors className="w-4 h-4" />
                 <span className="hidden sm:inline">Stitch</span>
-              </TabsTrigger>
-              <TabsTrigger value="audio" className="gap-2">
-                <Volume2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Audio</span>
               </TabsTrigger>
             </TabsList>
 
@@ -615,286 +594,14 @@ const Index = () => {
               </div>
             </TabsContent>
 
-            {/* Batch Generation Mode */}
-            <TabsContent value="batch" className="space-y-6 mt-6">
-              <div className="grid lg:grid-cols-2 gap-6">
-                <div className="space-y-6">
-                  {/* Reference Image */}
-                  <div className="card-elevated rounded-2xl p-6">
-                    <ReferenceImageUpload onImageChange={setReferenceImage} aspectRatio={aspectRatio} />
-                  </div>
-
-                  {/* Batch Panel */}
-                  <BatchGenerationPanel
-                    onScenesChange={(scenes) => {
-                      setBatchScenes(scenes);
-                    }}
-                    aspectRatio={aspectRatio}
-                    onGenerateBatch={handleBatchGenerate}
-                  />
-
-                  {/* Generate Batch Button */}
-                  <Button
-                    onClick={handleBatchGenerate}
-                    disabled={batchScenes.length === 0 || batchStatus === "generating" || batchStatus === "polling"}
-                    variant="hero"
-                    size="lg"
-                    className="w-full"
-                  >
-                    <Layers className="w-5 h-5 mr-2" />
-                    {batchStatus === "generating"
-                      ? "Starting Generation..."
-                      : batchStatus === "polling"
-                        ? `Generating ${batchScenes.length} Scenes...`
-                        : `Generate ${batchScenes.length} Scenes`}
-                  </Button>
-                  {/* Time Estimator */}
-                  <GenerationTimeEstimator
-                    sceneCount={batchScenes.length}
-                    averageDuration={8}
-                    complexity={getPromptComplexity(batchScenes.map(s => s.prompt).join(' '))}
-                    hasReferenceImage={!!referenceImage}
-                  />
-                </div>
-
-                <div className="space-y-6">
-                  <div className="card-elevated rounded-2xl p-6">
-                    <h3 className="font-heading font-semibold mb-4">Batch Progress</h3>
-                    {batchOperations.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Your scenes will appear here as they generate...</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {batchOperations.map((op, idx) => (
-                          <div key={idx} className="p-3 rounded-lg border border-border/50 bg-card/50">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium">Scene {op.order}</span>
-                              {op.success ? (
-                                op.status === "completed" ? (
-                                  <Badge variant="default">✓ Complete</Badge>
-                                ) : op.status === "failed" ? (
-                                  <Badge variant="destructive">✗ Failed</Badge>
-                                ) : (
-                                  <Badge variant="secondary">⏳ Generating...</Badge>
-                                )
-                              ) : (
-                                <Badge variant="destructive">Error</Badge>
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground truncate">{op.sceneDescription}</p>
-                            {op.videoUrl && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="mt-2 w-full"
-                                onClick={() => window.open(op.videoUrl, "_blank")}
-                              >
-                                View Video
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* Lyrics Sync Mode */}
-            <TabsContent value="lyrics-sync" className="space-y-6 mt-6">
-              <div className="grid lg:grid-cols-2 gap-6">
-                <div className="space-y-6">
-                  {/* Reference Image */}
-                  <div className="card-elevated rounded-2xl p-6">
-                    <ReferenceImageUpload onImageChange={setReferenceImage} aspectRatio={aspectRatio} />
-                  </div>
-
-                  {/* Base Visual Style */}
-                  <div className="card-elevated rounded-2xl p-6">
-                    <PromptInput value={prompt} onChange={setPrompt} />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      This will be your base visual style for all scenes
-                    </p>
-                  </div>
-
-                  {/* Lyrics Input */}
-                  <div className="card-elevated rounded-2xl p-6">
-                    <LyricsInput value={lyrics} onChange={setLyrics} />
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  {/* Time Estimator for Lyrics Sync */}
-                  {lyricsScenes.length > 0 && (
-                    <GenerationTimeEstimator
-                      sceneCount={lyricsScenes.length}
-                      averageDuration={audioDuration && lyricsScenes.length > 0 ? Math.floor(audioDuration / lyricsScenes.length) : 8}
-                      complexity={getPromptComplexity(prompt)}
-                      hasReferenceImage={!!referenceImage}
-                    />
-                  )}
-
-                  {/* Enhanced Lyrics to Video Sync */}
-                  <EnhancedLyricsToVideoSync
-                    lyrics={lyrics}
-                    baseVisualStyle={prompt}
-                    audioDuration={audioDuration || undefined}
-                    onScenesGenerated={(scenes) => {
-                      setLyricsScenes(scenes);
-                      setGeneratedScenes(scenes);
-                      console.log("Lyrics scenes:", scenes);
-                      toast.success(`Generated ${scenes.length} synced scenes!`);
-                    }}
-                    onGenerateBatch={handleLyricsSyncGenerate}
-                    onRegenerateScene={handleRegenerateScene}
-                    onAudioLoaded={handleAudioLoadedFromLyrics}
-                  />
-
-                  {/* Batch Progress for Lyrics Sync */}
-                  {batchOperations.length > 0 && (
-                    <div className="card-elevated rounded-2xl p-6">
-                      <h3 className="font-heading font-semibold mb-4">Generation Progress</h3>
-                      <div className="space-y-3">
-                        {batchOperations.map((op, idx) => (
-                          <div key={idx} className="p-3 rounded-lg border border-border/50 bg-card/50">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium">Scene {op.order}</span>
-                              {op.success ? (
-                                op.status === "completed" ? (
-                                  <Badge variant="default">✓ Complete</Badge>
-                                ) : op.status === "failed" ? (
-                                  <Badge variant="destructive">✗ Failed</Badge>
-                                ) : (
-                                  <Badge variant="secondary">⏳ Generating...</Badge>
-                                )
-                              ) : (
-                                <Badge variant="destructive">Error</Badge>
-                              )}
-                            </div>
-                            {op.videoUrl && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="mt-2 w-full"
-                                onClick={() => window.open(op.videoUrl, "_blank")}
-                              >
-                                View Video
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* Auto Detect Mode */}
-            <TabsContent value="auto-detect" className="space-y-6 mt-6">
-              <div className="grid lg:grid-cols-2 gap-6">
-                <div className="space-y-6">
-                  {/* Audio Upload for Auto Detect */}
-                  <div className="card-elevated rounded-2xl p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Music className="w-5 h-5 text-primary" />
-                      <h3 className="font-heading font-semibold text-foreground">Upload Audio</h3>
-                    </div>
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer border-border hover:border-primary/50 bg-secondary/30 transition-colors">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <Music className="w-8 h-8 mb-2 text-muted-foreground" />
-                        <p className="mb-2 text-sm text-foreground">
-                          {audioFile ? audioFile.name : <span><span className="font-semibold">Click to upload</span> or drag and drop</span>}
-                        </p>
-                        <p className="text-xs text-muted-foreground">MP3, WAV, M4A (MAX. 50MB)</p>
-                      </div>
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept="audio/*"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            setAudioFile(file);
-                            const url = URL.createObjectURL(file);
-                            setAudioUrl(url);
-                            
-                            // Get audio duration
-                            const audio = new Audio(url);
-                            audio.addEventListener('loadedmetadata', () => {
-                              setAudioDuration(audio.duration);
-                              toast.success(`Audio loaded: ${file.name}`);
-                            });
-                          }
-                        }}
-                      />
-                    </label>
-                    {audioFile && audioDuration && (
-                      <p className="text-sm text-primary mt-2">
-                        Duration: {Math.floor(audioDuration / 60)}:{String(Math.floor(audioDuration % 60)).padStart(2, '0')}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Base Visual Style */}
-                  <div className="card-elevated rounded-2xl p-6">
-                    <PromptInput value={prompt} onChange={setPrompt} />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      This will be your base visual style for all auto-detected scenes
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  {/* Audio Beat Detector */}
-                  <AudioBeatDetector
-                    audioFile={audioFile}
-                    audioUrl={audioUrl}
-                    audioDuration={audioDuration || 0}
-                    baseVisualStyle={prompt}
-                    onScenesGenerated={(scenes) => {
-                      setGeneratedScenes(scenes);
-                      toast.success(`Detected ${scenes.length} scenes from audio!`);
-                    }}
-                  />
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* Timeline Mode */}
-            <TabsContent value="timeline" className="space-y-6 mt-6">
-              <AudioWaveformTimeline
-                audioUrl={audioUrl}
-                scenes={generatedScenes}
-                audioDuration={audioDuration || 0}
-                onSceneClick={(scene) => {
-                  console.log("Scene clicked:", scene);
-                }}
-              />
+            {/* Storyboard Mode - Sora-style Timeline */}
+            <TabsContent value="storyboard" className="space-y-6 mt-6">
+              <StoryboardEditor onComplete={() => setGalleryRefresh((prev) => prev + 1)} />
             </TabsContent>
 
             {/* Stitch Mode */}
             <TabsContent value="stitch" className="space-y-6 mt-6">
               <StitchVideos />
-            </TabsContent>
-
-            {/* Audio Editor Mode */}
-            <TabsContent value="audio" className="space-y-6 mt-6">
-              <div className="max-w-3xl mx-auto">
-                <div className="card-elevated rounded-2xl p-6 mb-6">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Volume2 className="w-5 h-5 text-primary" />
-                    <h3 className="font-heading font-semibold text-foreground">Audio Editor</h3>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Upload your music to use for lyrics timing. The audio duration will automatically sync with the Lyrics tab.
-                  </p>
-                </div>
-                <AudioEditor onAudioLoaded={(duration) => {
-                  setAudioDuration(duration);
-                  toast.success(`Audio loaded: ${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`);
-                }} />
-              </div>
             </TabsContent>
           </Tabs>
 
