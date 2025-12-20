@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Pause, Check, Loader2, XCircle, RefreshCw, Edit2, GripVertical } from "lucide-react";
+import { Play, Pause, Check, Loader2, XCircle, RefreshCw, GripVertical, Music } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,6 +22,14 @@ interface CompactSceneCardProps {
   isDragging?: boolean;
   isDragOver?: boolean;
 }
+
+// Gradient classes for scene thumbnails
+const gradientClasses = [
+  "scene-gradient-1",
+  "scene-gradient-2",
+  "scene-gradient-3",
+  "scene-gradient-4",
+];
 
 export function CompactSceneCard({
   scene,
@@ -47,6 +55,8 @@ export function CompactSceneCard({
     setIsEditing(false);
   };
 
+  const gradientClass = gradientClasses[scene.index % gradientClasses.length];
+
   return (
     <div
       draggable={!isEditing}
@@ -57,11 +67,11 @@ export function CompactSceneCard({
       }}
       onDrop={(e) => onDrop?.(e, scene)}
       className={cn(
-        "group relative flex-shrink-0 w-48 rounded-lg overflow-hidden transition-all duration-200",
-        "border bg-card/50 hover:bg-card/80 cursor-grab active:cursor-grabbing",
+        "group relative flex-shrink-0 w-[200px] rounded-xl overflow-hidden transition-all duration-300",
+        "border bg-card cursor-grab active:cursor-grabbing scene-card-hover",
         scene.selected
-          ? "border-primary/60 ring-1 ring-primary/30"
-          : "border-border/40 hover:border-border",
+          ? "border-primary selected-glow"
+          : "border-border/40 hover:border-primary",
         disabled && "opacity-40 pointer-events-none",
         isDragging && "opacity-50 scale-95",
         isDragOver && "ring-2 ring-primary border-primary"
@@ -69,8 +79,8 @@ export function CompactSceneCard({
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
-      {/* Video/Thumbnail Area */}
-      <div className="aspect-video relative bg-secondary/50">
+      {/* Thumbnail Area - 16:9 aspect ratio */}
+      <div className={cn("w-[200px] h-[112px] relative overflow-hidden", gradientClass)}>
         {scene.videoUrl && showVideo ? (
           <video
             src={scene.videoUrl}
@@ -89,124 +99,111 @@ export function CompactSceneCard({
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             {scene.status === "generating" ? (
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <Loader2 className="w-8 h-8 animate-spin text-white/80" />
             ) : scene.status === "completed" ? (
-              <Check className="w-6 h-6 text-green-400" />
+              <Check className="w-8 h-8 text-white" />
             ) : scene.status === "failed" ? (
               <div className="flex flex-col items-center gap-2">
-                <XCircle className="w-5 h-5 text-destructive" />
+                <XCircle className="w-6 h-6 text-white/80" />
                 {onRetry && (
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={() => onRetry(scene)}
-                    className="h-6 text-xs px-2"
+                    variant="secondary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetry(scene);
+                    }}
+                    className="h-6 text-xs px-2 bg-white/20 hover:bg-white/30 text-white border-0"
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     Retry
                   </Button>
                 )}
               </div>
-            ) : (
-              <span className="text-2xl font-bold text-muted-foreground/30">
-                {scene.index + 1}
-              </span>
+            ) : null}
+          </div>
+        )}
+
+        {/* Play Icon Overlay - appears on hover */}
+        {onPlayAudio && scene.status !== "generating" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPlayAudio(scene);
+            }}
+            className={cn(
+              "absolute inset-0 flex items-center justify-center transition-opacity",
+              "bg-black/40 backdrop-blur-sm",
+              isHovering && !scene.videoUrl ? "opacity-100" : "opacity-0"
             )}
-          </div>
-        )}
-
-        {/* Mini Waveform */}
-        {scene.audioSegment && (
-          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-background/90 to-transparent">
-            <div className="flex items-end h-full px-0.5 gap-[1px]">
-              {scene.audioSegment.waveformData.slice(0, 30).map((value, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex-1 rounded-t transition-colors",
-                    scene.selected ? "bg-primary/70" : "bg-muted-foreground/40"
-                  )}
-                  style={{ height: `${value * 100}%` }}
-                />
-              ))}
+          >
+            <div className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center">
+              {isPlaying ? (
+                <Pause className="w-4 h-4 text-white" />
+              ) : (
+                <Play className="w-4 h-4 text-white ml-0.5" />
+              )}
             </div>
-          </div>
+          </button>
         )}
 
-        {/* Drag Handle & Selection Checkbox */}
-        <div className="absolute top-2 left-2 flex items-center gap-1">
-          <div className="p-0.5 rounded bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab">
-            <GripVertical className="w-3 h-3 text-muted-foreground" />
-          </div>
+        {/* Selection Checkbox */}
+        <div className="absolute top-2 left-2">
           <Checkbox
             checked={scene.selected}
             onCheckedChange={() => onToggleSelect(scene.id)}
             disabled={disabled}
-            className="bg-background/80 border-border/60"
+            className="bg-black/60 border-white/40 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
           />
         </div>
 
-        {/* Play Button */}
-        {onPlayAudio && (
-          <button
-            onClick={() => onPlayAudio(scene)}
-            className={cn(
-              "absolute top-2 right-2 p-1.5 rounded-full transition-all",
-              "bg-background/80 hover:bg-background text-foreground",
-              "opacity-0 group-hover:opacity-100"
-            )}
-          >
-            {isPlaying ? (
-              <Pause className="w-3 h-3" />
-            ) : (
-              <Play className="w-3 h-3" />
-            )}
-          </button>
-        )}
-
-        {/* Status Badge */}
-        {scene.status !== "pending" && (
-          <div className="absolute top-2 right-2">
-            {scene.status === "completed" && (
-              <div className="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center">
-                <Check className="w-3 h-3 text-green-400" />
-              </div>
-            )}
-          </div>
-        )}
+        {/* Drag Handle */}
+        <div className="absolute top-2 right-2 p-1 rounded bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab">
+          <GripVertical className="w-3 h-3 text-white/80" />
+        </div>
       </div>
 
       {/* Info Section */}
-      <div className="p-2 space-y-1">
-        {/* Header */}
+      <div className="p-3 space-y-2">
+        {/* Header Row */}
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-foreground">
+          <span className="text-[13px] font-semibold text-foreground">
             Scene {scene.index + 1}
           </span>
-          <span className="text-[10px] text-muted-foreground font-mono">
-            {scene.duration.toFixed(1)}s
+          <span className="text-[11px] text-muted-foreground font-mono">
+            {formatTime(scene.startTime)}-{Math.round(scene.duration)}s
           </span>
         </div>
 
-        {/* Time Range */}
-        <div className="text-[10px] text-muted-foreground">
-          {formatTime(scene.startTime)} → {formatTime(scene.endTime)}
+        {/* Icons Row */}
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded bg-secondary/80 flex items-center justify-center">
+            <Play className="w-3 h-3 text-muted-foreground" />
+          </div>
+          <div className="w-5 h-5 rounded bg-secondary/80 flex items-center justify-center">
+            <Music className="w-3 h-3 text-muted-foreground" />
+          </div>
+          {scene.status === "completed" && (
+            <div className="w-5 h-5 rounded bg-green-500/20 flex items-center justify-center ml-auto">
+              <Check className="w-3 h-3 text-green-400" />
+            </div>
+          )}
         </div>
 
         {/* Prompt */}
         {isEditing ? (
-          <div className="space-y-1">
+          <div className="space-y-2">
             <Textarea
               value={editedPrompt}
               onChange={(e) => setEditedPrompt(e.target.value)}
-              className="text-[10px] min-h-[40px] resize-none p-1.5"
+              className="text-[11px] min-h-[50px] resize-none p-2 bg-secondary/50 border-border"
               placeholder="Scene prompt..."
             />
             <div className="flex gap-1">
               <Button
                 size="sm"
                 onClick={handleSavePrompt}
-                className="h-5 text-[10px] px-2"
+                className="h-6 text-[10px] px-2 btn-gradient-primary"
               >
                 Save
               </Button>
@@ -217,22 +214,28 @@ export function CompactSceneCard({
                   setEditedPrompt(scene.prompt);
                   setIsEditing(false);
                 }}
-                className="h-5 text-[10px] px-2"
+                className="h-6 text-[10px] px-2"
               >
                 Cancel
               </Button>
             </div>
           </div>
         ) : (
-          <button
+          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+            "{scene.prompt || "Click Edit to add prompt..."}"
+          </p>
+        )}
+
+        {/* Edit Button */}
+        {!isEditing && (
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setIsEditing(true)}
-            className="w-full text-left group/prompt"
+            className="w-full h-7 text-[11px] bg-secondary/30 border-border/50 hover:bg-secondary hover:border-primary"
           >
-            <p className="text-[10px] text-muted-foreground line-clamp-2 group-hover/prompt:text-foreground transition-colors">
-              {scene.prompt || "Click to add prompt..."}
-            </p>
-            <Edit2 className="w-2.5 h-2.5 mt-0.5 text-muted-foreground opacity-0 group-hover/prompt:opacity-100 transition-opacity" />
-          </button>
+            Edit
+          </Button>
         )}
       </div>
     </div>
