@@ -14,6 +14,12 @@ interface SceneInput {
   tempo?: string;
 }
 
+interface LyricSection {
+  index: number;
+  text: string;
+  type: string;
+}
+
 // Words that commonly trigger Vertex AI content filters
 const FLAGGED_PATTERNS = [
   /\b(drug|drugs|cocaine|heroin|meth|weed|marijuana|smoking|drunk|alcohol|beer|wine|vodka)\b/gi,
@@ -103,26 +109,49 @@ serve(async (req) => {
   }
 
   try {
-    const { basePrompt, scenes, aspectRatio, preserveFace } = await req.json();
+    const { basePrompt, scenes, aspectRatio, preserveFace, lyrics, lyricSections } = await req.json();
 
     // Sanitize the base prompt first
     const sanitizedBasePrompt = sanitizePrompt(basePrompt);
     console.log('Generating prompts for', scenes.length, 'scenes');
-    console.log('Original base prompt:', basePrompt.substring(0, 100));
+    console.log('Original base prompt:', basePrompt?.substring(0, 100));
     console.log('Sanitized base prompt:', sanitizedBasePrompt.substring(0, 100));
+    console.log('Lyrics mode:', lyrics ? 'enabled' : 'disabled');
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
+    // Build scene descriptions with optional lyric context
+    const typedLyricSections = lyricSections as LyricSection[] | undefined;
     const sceneDescriptions = (scenes as SceneInput[]).map((scene, i) => {
       const energyDesc = scene.energyLevel 
         ? scene.energyLevel > 0.7 ? "high energy" : scene.energyLevel > 0.4 ? "medium energy" : "calm/low energy"
         : "unknown energy";
       const tempoDesc = scene.tempo || "medium tempo";
-      return `Scene ${scene.index + 1} (${scene.startTime.toFixed(1)}s - ${scene.endTime.toFixed(1)}s, ${scene.duration.toFixed(1)}s): ${energyDesc}, ${tempoDesc}`;
+      
+      // Include lyric context if available (sanitized)
+      let lyricContext = "";
+      if (typedLyricSections && typedLyricSections[i]) {
+        const sanitizedLyric = sanitizePrompt(typedLyricSections[i].text);
+        // Extract key visual themes from lyrics instead of using them directly
+        lyricContext = ` | Visual mood from theme: "${sanitizedLyric.substring(0, 60)}..."`;
+      }
+      
+      return `Scene ${scene.index + 1} (${scene.startTime.toFixed(1)}s - ${scene.endTime.toFixed(1)}s, ${scene.duration.toFixed(1)}s): ${energyDesc}, ${tempoDesc}${lyricContext}`;
     }).join("\n");
+
+    // Enhanced system prompt for lyrics mode
+    const lyricsInstructions = lyrics ? `
+
+LYRICS MODE ACTIVE:
+- You are creating visuals for a music video based on song lyrics
+- DO NOT include any text, words, or lyrics in the prompts - only VISUAL descriptions
+- Interpret the MOOD and THEMES of each lyric section into abstract visuals
+- Create visual metaphors that match the emotional arc of the song
+- Use the reference image style consistently across all scenes
+- Focus on camera movement, color grading, and atmospheric effects that match the song's energy` : "";
 
     const systemPrompt = `You are a visual director creating prompts for Google Veo AI video generation. Generate ONLY safe, abstract visual descriptions.
 
@@ -133,7 +162,7 @@ CRITICAL SAFETY RULES - FOLLOW STRICTLY:
 - AVOID emotional themes - use ABSTRACT VISUAL metaphors instead
 - NO specific person names or celebrity references
 - NO suggestive, provocative, or mature content
-- Keep all prompts appropriate for general audiences
+- Keep all prompts appropriate for general audiences${lyricsInstructions}
 
 VISUAL FOCUS:
 - Camera movements: tracking, dolly, crane, slow push-in, orbit
@@ -147,12 +176,12 @@ PROMPT STRUCTURE:
 - Use present tense, active voice
 - Match energy level to visual dynamism (not emotional content)
 - Aspect ratio is ${aspectRatio}
-- ${preserveFace ? "Maintain consistent character appearance across scenes" : "Focus on environment and abstract motion"}`;
+- ${preserveFace ? "Maintain consistent character appearance across scenes using the reference image style" : "Focus on environment and abstract motion"}`;
 
     const userPrompt = `Base visual style (sanitized): "${sanitizedBasePrompt}"
 
 Generate a unique, SAFE visual prompt for each scene. Focus on camera movement, lighting, and abstract visuals. Do NOT include any lyrics, dialogue, or emotional text.
-
+${lyrics ? "\nThis is for a MUSIC VIDEO - create visually cohesive scenes that flow together like a professional music video. Each scene should have dynamic camera movement and match the energy of the song.\n" : ""}
 ${sceneDescriptions}
 
 Return a JSON array with prompts for each scene in order. Each object should have "index" (number) and "prompt" (string).`;

@@ -1,19 +1,33 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight } from "lucide-react";
+import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight, FileText, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
 import { splitAudio, AudioSegment, formatTime } from "@/utils/audioSplitter";
+import { parseLyrics, LyricSection } from "@/utils/lyricsParser";
+import { stitchVideos, StitchProgress } from "@/utils/videoStitcher";
 
 type Step = 1 | 2 | 3 | 4;
 type MediaType = 'image' | 'video' | null;
+type GenerationMode = 'lipsync' | 'lyrics';
 
 interface GeneratedClip {
   id: string;
   segmentIndex: number;
   outputUrl: string;
+  startTime: number;
+  endTime: number;
+}
+
+interface LyricsSceneClip {
+  id: string;
+  index: number;
+  videoUrl: string;
+  prompt: string;
   startTime: number;
   endTime: number;
 }
@@ -33,6 +47,14 @@ const SimpleMusicVideo = () => {
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [uploadedMediaUrl, setUploadedMediaUrl] = useState<string | null>(null);
   
+  // Lyrics Mode state
+  const [lyrics, setLyrics] = useState<string>("");
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('lipsync');
+  const [lyricsSceneClips, setLyricsSceneClips] = useState<LyricsSceneClip[]>([]);
+  const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
+  const [stitchProgress, setStitchProgress] = useState<StitchProgress | null>(null);
+  
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -40,7 +62,7 @@ const SimpleMusicVideo = () => {
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [estimatedCost, setEstimatedCost] = useState<number>(0);
   
-  // Generated clips
+  // Generated clips (for lipsync mode)
   const [generatedClips, setGeneratedClips] = useState<GeneratedClip[]>([]);
   const [clipOrder, setClipOrder] = useState<number[]>([]);
   
@@ -50,6 +72,18 @@ const SimpleMusicVideo = () => {
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+
+  // Detect generation mode based on inputs
+  useEffect(() => {
+    if (lyrics.trim() && mediaType === 'image') {
+      setGenerationMode('lyrics');
+    } else {
+      setGenerationMode('lipsync');
+    }
+  }, [lyrics, mediaType]);
+
+  // Calculate scene count for lyrics mode
+  const lyricsSceneCount = audioDuration ? Math.min(Math.floor(audioDuration / 6), 10) : 0;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -445,6 +479,202 @@ const SimpleMusicVideo = () => {
     setVideoRecordId(null);
     setEstimatedCost(0);
     setCurrentSegmentIndex(0);
+    // Reset lyrics mode state
+    setLyrics("");
+    setLyricsOpen(false);
+    setGenerationMode('lipsync');
+    setLyricsSceneClips([]);
+    setFinalVideoUrl(null);
+    setStitchProgress(null);
+  };
+
+  // ==================== LYRICS MODE GENERATION ====================
+  const handleLyricsModeGenerate = async () => {
+    if (!audioFile || !mediaFile || !lyrics.trim() || !audioDuration) {
+      toast.error("Please upload audio, image, and add lyrics");
+      return;
+    }
+
+    setIsGenerating(true);
+    setStep(3);
+    setProgress(5);
+    setLyricsSceneClips([]);
+    setFinalVideoUrl(null);
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error("Not authenticated");
+
+      // Step 1: Calculate scenes based on audio duration
+      const sceneCount = Math.min(Math.floor(audioDuration / 6), 10);
+      const sceneDuration = audioDuration / sceneCount;
+      
+      setStatusMessage(`Analyzing lyrics for ${sceneCount} scenes...`);
+      setProgress(10);
+
+      // Step 2: Parse lyrics into sections
+      const lyricSections = parseLyrics(lyrics, sceneCount);
+      console.log('Parsed lyric sections:', lyricSections);
+
+      // Step 3: Upload reference image
+      setStatusMessage("Uploading reference image...");
+      setProgress(15);
+      const imageUrl = await uploadToStorage(
+        mediaFile,
+        'videos',
+        `lyrics-reference-${Date.now()}.${mediaFile.name.split('.').pop()}`
+      );
+
+      // Step 4: Generate scene prompts with lyrics context
+      setStatusMessage("Creating visual prompts from lyrics...");
+      setProgress(20);
+
+      const scenes = lyricSections.map((section, i) => ({
+        index: i,
+        startTime: i * sceneDuration,
+        endTime: (i + 1) * sceneDuration,
+        duration: sceneDuration,
+        energyLevel: 0.6,
+        tempo: "medium tempo"
+      }));
+
+      const { data: promptData, error: promptError } = await supabase.functions.invoke('generate-scene-prompts', {
+        body: {
+          basePrompt: `Visual style inspired by the reference image. Create cinematic music video scenes with dynamic camera movement.`,
+          scenes,
+          aspectRatio: '9:16',
+          preserveFace: true,
+          lyrics: lyrics,
+          lyricSections: lyricSections
+        }
+      });
+
+      if (promptError) throw promptError;
+      if (!promptData.success) throw new Error(promptData.error || 'Failed to generate prompts');
+
+      const generatedPrompts = promptData.prompts;
+      console.log('Generated prompts:', generatedPrompts);
+
+      // Step 5: Generate all video clips via batch generation
+      setStatusMessage(`Generating ${sceneCount} video scenes...`);
+      setProgress(25);
+
+      const scenesForBatch = generatedPrompts.map((p: { index: number; prompt: string }, i: number) => ({
+        id: `scene-${i}`,
+        order: i,
+        prompt: p.prompt,
+        duration: 6 // Each scene is 6 seconds
+      }));
+
+      const { data: batchData, error: batchError } = await supabase.functions.invoke('generate-batch-videos', {
+        body: {
+          scenes: scenesForBatch,
+          referenceImageUrl: imageUrl,
+          aspectRatio: '9:16',
+          preserveFace: true
+        }
+      });
+
+      if (batchError) throw batchError;
+      if (!batchData.success) throw new Error(batchData.error || 'Failed to start batch generation');
+
+      // Step 6: Poll for completion
+      const batchId = batchData.batchId;
+      const completedClips = await pollBatchCompletion(batchId, sceneCount, generatedPrompts);
+      
+      setLyricsSceneClips(completedClips);
+      setProgress(85);
+
+      // Step 7: Stitch videos together
+      setStatusMessage("Stitching clips into final video...");
+      const videoUrls = completedClips.map(c => c.videoUrl);
+      
+      const stitchResult = await stitchVideos(videoUrls, (sp) => {
+        setStitchProgress(sp);
+        setProgress(85 + (sp.progress * 0.15));
+        if (sp.stage === 'stitching') {
+          setStatusMessage(`Stitching clip ${sp.currentClip}/${sp.totalClips}...`);
+        } else if (sp.stage === 'encoding') {
+          setStatusMessage("Encoding final video...");
+        }
+      });
+
+      setFinalVideoUrl(stitchResult.url);
+      setProgress(100);
+      setStatusMessage("Music video complete!");
+      setStep(4);
+      setIsGenerating(false);
+      toast.success("Your music video is ready!");
+
+    } catch (error) {
+      console.error('Lyrics mode generation error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to generate music video');
+      setIsGenerating(false);
+      setStep(2);
+    }
+  };
+
+  // Poll batch video generation for completion
+  const pollBatchCompletion = async (
+    batchId: string, 
+    sceneCount: number,
+    prompts: { index: number; prompt: string }[]
+  ): Promise<LyricsSceneClip[]> => {
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      const maxAttempts = 120; // 10 minutes max
+      
+      const interval = setInterval(async () => {
+        attempts++;
+        
+        if (attempts > maxAttempts) {
+          clearInterval(interval);
+          reject(new Error('Generation timed out'));
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-batch-videos', {
+            body: { action: 'status', batchId }
+          });
+
+          if (error) {
+            clearInterval(interval);
+            reject(error);
+            return;
+          }
+
+          const completedCount = data.scenes?.filter((s: any) => s.status === 'completed').length || 0;
+          const progressPercent = 25 + ((completedCount / sceneCount) * 60);
+          setProgress(progressPercent);
+          setStatusMessage(`Generating scene ${completedCount + 1} of ${sceneCount}...`);
+          setCurrentSegmentIndex(completedCount);
+
+          if (data.status === 'completed' || completedCount === sceneCount) {
+            clearInterval(interval);
+            
+            const clips: LyricsSceneClip[] = data.scenes
+              .filter((s: any) => s.status === 'completed' && s.videoUrl)
+              .map((s: any, i: number) => ({
+                id: s.id,
+                index: i,
+                videoUrl: s.videoUrl,
+                prompt: prompts[i]?.prompt || '',
+                startTime: i * 6,
+                endTime: (i + 1) * 6
+              }));
+            
+            resolve(clips);
+          } else if (data.status === 'failed') {
+            clearInterval(interval);
+            reject(new Error('Batch generation failed'));
+          }
+        } catch (err) {
+          clearInterval(interval);
+          reject(err);
+        }
+      }, 5000);
+    });
   };
 
   // Get ordered clips
@@ -530,6 +760,61 @@ const SimpleMusicVideo = () => {
                 )}
               </div>
 
+              {/* Lyrics Section (Optional) */}
+              <Collapsible open={lyricsOpen} onOpenChange={setLyricsOpen} className="w-full">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full h-14 text-lg font-medium border-2 border-dashed border-purple-300 hover:border-purple-500 hover:bg-purple-50"
+                  >
+                    <FileText className="w-5 h-5 mr-2" />
+                    {lyrics.trim() ? 'Lyrics Added ✓' : 'Add Lyrics (Optional)'}
+                    {lyricsOpen ? <ChevronUp className="w-5 h-5 ml-2" /> : <ChevronDown className="w-5 h-5 ml-2" />}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-4 space-y-4">
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-200">
+                    <div className="flex items-start gap-3">
+                      <Sparkles className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-left">
+                        <p className="font-semibold text-purple-900">Lyrics Mode</p>
+                        <p className="text-sm text-purple-700">
+                          Paste your song lyrics below and upload a photo (not video). 
+                          We'll automatically generate {lyricsSceneCount || 'multiple'} video scenes based on your lyrics, 
+                          using your photo as the visual style reference.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <Textarea
+                    placeholder="Paste your song lyrics here...
+
+Example:
+[Verse 1]
+Walking down the empty street
+The city lights beneath my feet
+
+[Chorus]
+We're flying high tonight
+Under the neon lights..."
+                    value={lyrics}
+                    onChange={(e) => setLyrics(e.target.value)}
+                    className="min-h-[200px] text-base"
+                  />
+                  {lyrics.trim() && audioDuration && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-left">
+                      <p className="text-green-800 font-medium flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4" />
+                        Lyrics Mode Ready: {lyricsSceneCount} scenes will be generated
+                      </p>
+                      <p className="text-green-700 text-sm mt-1">
+                        Each scene will be ~6 seconds based on your {formatTime(audioDuration)} song
+                      </p>
+                    </div>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+
               {statusMessage && (
                 <div className="flex items-center justify-center gap-2 text-purple-600">
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -542,7 +827,7 @@ const SimpleMusicVideo = () => {
                 disabled={!audioFile || audioSegments.length === 0}
                 className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
               >
-                Next: Choose Your Character
+                Next: Choose Your {lyrics.trim() ? 'Reference Image' : 'Character'}
                 <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             </div>
@@ -619,27 +904,47 @@ const SimpleMusicVideo = () => {
                 )}
               </div>
 
-              {/* Model info */}
+              {/* Mode info */}
               {mediaFile && (
-                <div className="bg-purple-50 rounded-xl p-4 text-left">
-                  <p className="font-medium text-purple-900">
-                    {mediaType === 'video' ? '🎬 Video Input' : '📷 Photo Input'}
-                  </p>
-                  <p className="text-sm text-purple-700">
-                    {mediaType === 'video' 
-                      ? 'Using lipsync-2 model for best quality video-to-video lip-sync'
-                      : 'Using lipsync-1.9.0-beta model for image-to-video generation'
-                    }
-                  </p>
+                <div className={`rounded-xl p-4 text-left ${generationMode === 'lyrics' ? 'bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200' : 'bg-purple-50'}`}>
+                  {generationMode === 'lyrics' ? (
+                    <>
+                      <p className="font-medium text-purple-900 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4" />
+                        Lyrics Mode Active
+                      </p>
+                      <p className="text-sm text-purple-700">
+                        Will generate {lyricsSceneCount} video scenes from your lyrics using this image as the visual style
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium text-purple-900">
+                        {mediaType === 'video' ? '🎬 Video Input' : '📷 Photo Input'}
+                      </p>
+                      <p className="text-sm text-purple-700">
+                        {mediaType === 'video' 
+                          ? 'Using lipsync-2 model for best quality video-to-video lip-sync'
+                          : 'Using lipsync-1.9.0-beta model for image-to-video generation'
+                        }
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 
               {/* Cost estimate */}
               <div className="bg-gray-100 rounded-xl p-4 space-y-1">
                 <p className="text-gray-600">
-                  Estimated cost: <span className="font-bold text-gray-900">${estimatedCost.toFixed(2)}</span>
+                  Estimated cost: <span className="font-bold text-gray-900">
+                    ${generationMode === 'lyrics' ? (lyricsSceneCount * 0.05).toFixed(2) : estimatedCost.toFixed(2)}
+                  </span>
                 </p>
-                {audioSegments.length > 1 && (
+                {generationMode === 'lyrics' ? (
+                  <p className="text-sm text-gray-500">
+                    ({lyricsSceneCount} scenes × $0.05 each)
+                  </p>
+                ) : audioSegments.length > 1 && (
                   <p className="text-sm text-gray-500">
                     ({audioSegments.length} clips × $0.40 each)
                   </p>
@@ -656,14 +961,21 @@ const SimpleMusicVideo = () => {
                   Back
                 </Button>
                 <Button
-                  onClick={handleGenerate}
-                  disabled={!mediaFile}
+                  onClick={generationMode === 'lyrics' ? handleLyricsModeGenerate : handleGenerate}
+                  disabled={!mediaFile || (generationMode === 'lyrics' && mediaType !== 'image')}
                   className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
                 >
-                  Create My Video
+                  {generationMode === 'lyrics' ? 'Generate Music Video' : 'Create My Video'}
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
               </div>
+
+              {/* Lyrics mode warning for video input */}
+              {generationMode === 'lyrics' && mediaType === 'video' && (
+                <p className="text-amber-600 text-sm">
+                  ⚠️ Lyrics mode requires a photo, not a video. Please upload a photo instead.
+                </p>
+              )}
             </div>
           )}
 
