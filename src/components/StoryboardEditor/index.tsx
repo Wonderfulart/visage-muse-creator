@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Settings, X, Wand2, Sparkles, Loader2, Download, Music } from "lucide-react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { Settings, X, Wand2, Sparkles, Loader2, Download, Music, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,7 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const pollingIntervals = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
-  const selectedScenes = scenes.filter((s) => s.selected);
+  const selectedScenes = useMemo(() => scenes.filter((s) => s.selected), [scenes]);
   const allCompleted = selectedScenes.length > 0 && selectedScenes.every((s) => s.status === "completed");
   const anyGenerating = selectedScenes.some((s) => s.status === "generating");
   const maxScenes = 10;
@@ -298,7 +298,6 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
         }
       );
 
-      // Download merged videos
       results.forEach((result, i) => {
         downloadMergedVideo(result.blob, `scene-${i + 1}-with-audio.webm`);
       });
@@ -403,12 +402,9 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
       const draggedIndex = newScenes.findIndex(s => s.id === draggedScene.id);
       const targetIndex = newScenes.findIndex(s => s.id === targetScene.id);
       
-      // Remove dragged scene
       const [removed] = newScenes.splice(draggedIndex, 1);
-      // Insert at target position
       newScenes.splice(targetIndex, 0, removed);
       
-      // Update indices
       return newScenes.map((scene, i) => ({ ...scene, index: i }));
     });
 
@@ -486,31 +482,41 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
   const hasAudio = audioUrl && scenes.length > 0;
 
   return (
-    <div className="min-h-screen bg-background pb-40">
+    <div className="min-h-screen bg-sora pb-60">
       {/* Header Bar */}
-      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-xl border-b border-border/50">
-        <div className="max-w-screen-2xl mx-auto px-4 h-14 flex items-center justify-between">
-          {/* Left: Settings */}
-          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-2">
-                <Settings className="w-4 h-4" />
-                <span className="hidden sm:inline">Settings</span>
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-full sm:max-w-xl overflow-y-auto">
-              <SheetHeader>
-                <SheetTitle>Project Settings</SheetTitle>
-              </SheetHeader>
-              <div className="mt-6">
-                <SetupPanel
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  onNext={() => setSettingsOpen(false)}
-                />
-              </div>
-            </SheetContent>
-          </Sheet>
+      <div className="sticky top-0 z-40 bg-sora-elevated border-b border-border">
+        <div className="max-w-screen-2xl mx-auto px-6 h-16 flex items-center justify-between">
+          {/* Left: Logo + Settings */}
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold text-gradient-primary tracking-tight">
+              VEOSTUDIO STORYBOARD
+            </h1>
+            
+            <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+              <SheetTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="gap-2 btn-sora"
+                >
+                  <Settings className="w-4 h-4" />
+                  Settings
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto bg-sora-elevated border-l border-border">
+                <SheetHeader>
+                  <SheetTitle className="text-foreground">Project Settings</SheetTitle>
+                </SheetHeader>
+                <div className="mt-6">
+                  <SetupPanel
+                    settings={settings}
+                    onSettingsChange={setSettings}
+                    onNext={() => setSettingsOpen(false)}
+                  />
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
 
           {/* Center: Status */}
           <div className="flex items-center gap-3">
@@ -537,51 +543,26 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-2">
-            {hasAudio && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => generateAIPrompts(scenes)}
-                disabled={isGeneratingPrompts}
-              >
-                {isGeneratingPrompts ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Sparkles className="w-4 h-4" />
-                )}
-                <span className="ml-2 hidden sm:inline">AI Prompts</span>
-              </Button>
-            )}
-            
+          <div className="flex items-center gap-3">
             {allCompleted && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleApplyAudio}
-                  disabled={isMerging}
-                >
-                  <Music className="w-4 h-4" />
-                  <span className="ml-2 hidden sm:inline">
-                    {isMerging ? "Merging..." : "Apply Audio"}
-                  </span>
-                </Button>
-                <Button variant="outline" size="sm" onClick={downloadAll}>
-                  <Download className="w-4 h-4" />
-                  <span className="ml-2 hidden sm:inline">Download All</span>
-                </Button>
-              </>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadAll}
+                className="btn-sora"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download All
+              </Button>
             )}
 
             {hasAudio && !allCompleted && !anyGenerating && (
               <Button
                 onClick={handleGenerate}
                 size="sm"
-                className="bg-primary hover:bg-primary/90"
+                className="btn-gradient-primary px-5"
               >
-                <Wand2 className="w-4 h-4 mr-2" />
-                Generate {selectedScenes.length}
+                Generate Selected ({selectedScenes.length}/{maxScenes})
               </Button>
             )}
 
@@ -595,14 +576,14 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
 
         {/* Progress Bar */}
         {anyGenerating && (
-          <div className="px-4 pb-2">
+          <div className="px-6 pb-2">
             <Progress value={(completedCount / selectedScenes.length) * 100} className="h-1" />
           </div>
         )}
       </div>
 
       {/* Main Content */}
-      <div className="max-w-screen-2xl mx-auto px-4 py-6">
+      <div className="max-w-screen-2xl mx-auto px-6 py-6">
         {currentStep === "setup" && !hasAudio && (
           <div className="space-y-6">
             <SetupPanel
@@ -622,60 +603,38 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
           />
         )}
 
-        {/* Timeline View - Film Strip Style */}
+        {/* Scene Cards Strip */}
         {hasAudio && (
           <div className="space-y-6">
-            {/* Scene Strip */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-foreground">
-                  Scenes
-                  <span className="ml-2 text-muted-foreground">
-                    ({selectedScenes.length}/{maxScenes} selected)
-                  </span>
-                </h3>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setScenes(prev => prev.map(s => ({ ...s, selected: false })))}
-                  >
-                    Clear
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setScenes(prev => prev.map((s, i) => ({ ...s, selected: i < maxScenes })))}
-                  >
-                    Select First 10
-                  </Button>
+            <ScrollArea className="w-full">
+              <div className="flex gap-4 pb-4 scrollbar-sora" onDragEnd={handleDragEnd}>
+                {scenes.map((scene) => (
+                  <CompactSceneCard
+                    key={scene.id}
+                    scene={scene}
+                    onToggleSelect={toggleSelect}
+                    onUpdatePrompt={updatePrompt}
+                    onPlayAudio={playSceneAudio}
+                    onRetry={retryFailedScene}
+                    isPlaying={playingSceneId === scene.id}
+                    disabled={!scene.selected && selectedScenes.length >= maxScenes}
+                    showVideo={scene.status === "completed"}
+                    onDragStart={handleDragStart}
+                    onDragOver={(e) => handleDragOver(e, scene.id)}
+                    onDrop={handleDrop}
+                    isDragging={draggedScene?.id === scene.id}
+                    isDragOver={dragOverSceneId === scene.id}
+                  />
+                ))}
+                
+                {/* Add Scene Card */}
+                <div className="add-scene-card h-[calc(112px+120px)]">
+                  <Plus className="w-8 h-8 text-muted-foreground mb-2" />
+                  <span className="text-sm text-muted-foreground">Add Scene</span>
                 </div>
               </div>
-
-              <ScrollArea className="w-full">
-                <div className="flex gap-3 pb-4" onDragEnd={handleDragEnd}>
-                  {scenes.map((scene) => (
-                    <CompactSceneCard
-                      key={scene.id}
-                      scene={scene}
-                      onToggleSelect={toggleSelect}
-                      onUpdatePrompt={updatePrompt}
-                      onPlayAudio={playSceneAudio}
-                      onRetry={retryFailedScene}
-                      isPlaying={playingSceneId === scene.id}
-                      disabled={!scene.selected && selectedScenes.length >= maxScenes}
-                      showVideo={scene.status === "completed"}
-                      onDragStart={handleDragStart}
-                      onDragOver={(e) => handleDragOver(e, scene.id)}
-                      onDrop={handleDrop}
-                      isDragging={draggedScene?.id === scene.id}
-                      isDragOver={dragOverSceneId === scene.id}
-                    />
-                  ))}
-                </div>
-                <ScrollBar orientation="horizontal" />
-              </ScrollArea>
-            </div>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
           </div>
         )}
       </div>
