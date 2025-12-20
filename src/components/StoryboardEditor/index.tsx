@@ -1,12 +1,14 @@
 import { useState, useCallback } from "react";
-import { Settings, Music, Clock, Wand2, Check } from "lucide-react";
+import { Settings, Music, Clock, Wand2, Check, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import { SetupPanel } from "./SetupPanel";
 import { AudioUploadPanel } from "./AudioUploadPanel";
 import { TimelinePanel } from "./TimelinePanel";
 import { GenerationPanel } from "./GenerationPanel";
 import { Scene, StoryboardSettings, StoryboardStep } from "./types";
 import { AudioSegment } from "@/utils/audioSplitter";
+import { Button } from "@/components/ui/button";
 
 interface StoryboardEditorProps {
   onComplete?: () => void;
@@ -20,11 +22,10 @@ const STEPS: { id: StoryboardStep; label: string; icon: React.ElementType }[] = 
 ];
 
 /**
- * Generate scene prompts based on base style and segment position
+ * Generate fallback prompts based on base style and segment position (used when AI fails)
  */
-function generateScenePrompts(
+function generateFallbackPrompts(
   basePrompt: string,
-  segmentCount: number,
   segments: AudioSegment[]
 ): string[] {
   const moods = [
@@ -42,10 +43,8 @@ function generateScenePrompts(
 
   return segments.map((segment, i) => {
     const mood = moods[i % moods.length];
-    // Analyze waveform energy (average amplitude)
     const avgEnergy = segment.waveformData.reduce((a, b) => a + b, 0) / segment.waveformData.length;
     const energyDesc = avgEnergy > 0.5 ? "high energy" : avgEnergy > 0.3 ? "moderate energy" : "calm";
-
     return `${basePrompt}, ${mood}, ${energyDesc} section`;
   });
 }
@@ -64,8 +63,60 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioUrl, setAudioUrl] = useState("");
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
 
   const currentStepIndex = STEPS.findIndex((s) => s.id === currentStep);
+
+  /**
+   * Generate AI-powered prompts for all scenes
+   */
+  const generateAIPrompts = useCallback(async (currentScenes: Scene[]) => {
+    if (!settings.basePrompt || currentScenes.length === 0) return;
+
+    setIsGeneratingPrompts(true);
+    try {
+      const sceneData = currentScenes.map(scene => {
+        const avgEnergy = scene.audioSegment?.waveformData 
+          ? scene.audioSegment.waveformData.reduce((a, b) => a + b, 0) / scene.audioSegment.waveformData.length
+          : 0.5;
+        
+        return {
+          index: scene.index,
+          startTime: scene.startTime,
+          endTime: scene.endTime,
+          duration: scene.duration,
+          energyLevel: avgEnergy,
+          tempo: avgEnergy > 0.6 ? "fast" : avgEnergy > 0.35 ? "medium" : "slow"
+        };
+      });
+
+      const { data, error } = await supabase.functions.invoke('generate-scene-prompts', {
+        body: {
+          basePrompt: settings.basePrompt,
+          scenes: sceneData,
+          aspectRatio: settings.aspectRatio,
+          preserveFace: settings.preserveFace
+        }
+      });
+
+      if (error) throw error;
+
+      if (data?.success && data?.prompts) {
+        setScenes(prev => prev.map(scene => {
+          const aiPrompt = data.prompts.find((p: { index: number; prompt: string }) => p.index === scene.index);
+          return aiPrompt ? { ...scene, prompt: aiPrompt.prompt } : scene;
+        }));
+        toast.success("AI prompts generated!");
+      } else {
+        throw new Error(data?.error || "Failed to generate prompts");
+      }
+    } catch (err) {
+      console.error("AI prompt generation failed:", err);
+      toast.error("AI prompts failed, using fallback prompts");
+    } finally {
+      setIsGeneratingPrompts(false);
+    }
+  }, [settings.basePrompt, settings.aspectRatio, settings.preserveFace]);
 
   const handleAudioProcessed = useCallback(
     (segments: AudioSegment[], waveform: number[], duration: number, file: File) => {
@@ -74,8 +125,8 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
       setAudioFile(file);
       setAudioUrl(URL.createObjectURL(file));
 
-      // Generate scene prompts
-      const prompts = generateScenePrompts(settings.basePrompt, segments.length, segments);
+      // Generate fallback prompts first
+      const fallbackPrompts = generateFallbackPrompts(settings.basePrompt, segments);
 
       // Create scenes from segments
       const newScenes: Scene[] = segments.map((segment, i) => ({
@@ -84,15 +135,18 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
         startTime: segment.startTime,
         endTime: segment.endTime,
         duration: segment.duration,
-        prompt: prompts[i],
+        prompt: fallbackPrompts[i],
         audioSegment: segment,
         status: "pending",
-        selected: i < 10, // Select first 10 by default
+        selected: i < 10,
       }));
 
       setScenes(newScenes);
+      
+      // Then trigger AI prompt generation in background
+      generateAIPrompts(newScenes);
     },
-    [settings.basePrompt]
+    [settings.basePrompt, generateAIPrompts]
   );
 
   const goToStep = (step: StoryboardStep) => {
@@ -150,6 +204,14 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
         </div>
       </div>
 
+      {/* AI Prompt Generation Status */}
+      {isGeneratingPrompts && (
+        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>Generating AI prompts for scenes...</span>
+        </div>
+      )}
+
       {/* Step Content */}
       <div className="min-h-[500px]">
         {currentStep === "setup" && (
@@ -178,6 +240,8 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
             onScenesChange={setScenes}
             onNext={() => goToStep("generate")}
             onBack={() => goToStep("audio")}
+            onRegeneratePrompts={() => generateAIPrompts(scenes)}
+            isGeneratingPrompts={isGeneratingPrompts}
           />
         )}
 
