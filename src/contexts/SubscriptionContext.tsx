@@ -55,12 +55,12 @@ export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   const refreshSubscription = useCallback(async () => {
-    // Wait for auth to finish loading and ensure we have a valid token
+    // Wait for auth to finish loading
     if (authLoading) {
       return;
     }
 
-    if (!session?.access_token) {
+    if (!user) {
       setSubscription(defaultSubscription);
       setLoading(false);
       return;
@@ -68,13 +68,39 @@ export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       setError(null);
+      
+      // Get fresh session to avoid stale token issues during refresh
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) {
+        setSubscription(defaultSubscription);
+        setLoading(false);
+        return;
+      }
+
       const { data, error: fnError } = await supabase.functions.invoke('check-subscription', {
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
       if (fnError) {
+        // If JWT is invalid, try refreshing the session once
+        if (fnError.message?.includes('Invalid JWT') || fnError.message?.includes('401')) {
+          const { data: refreshedSession } = await supabase.auth.refreshSession();
+          if (refreshedSession.session?.access_token) {
+            const { data: retryData, error: retryError } = await supabase.functions.invoke('check-subscription', {
+              headers: {
+                Authorization: `Bearer ${refreshedSession.session.access_token}`,
+              },
+            });
+            if (!retryError && retryData) {
+              setSubscription(retryData as SubscriptionData);
+              return;
+            }
+          }
+        }
         throw new Error(fnError.message);
       }
 
@@ -90,7 +116,7 @@ export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [session?.access_token, authLoading]);
+  }, [user, authLoading]);
 
   // Check subscription on mount and when user/auth state changes
   useEffect(() => {
@@ -105,7 +131,7 @@ export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
       setSubscription(null);
       setLoading(false);
     }
-  }, [user, session?.access_token, authLoading, refreshSubscription]);
+  }, [user, authLoading, refreshSubscription]);
 
   // Auto-refresh every 5 minutes
   useEffect(() => {
