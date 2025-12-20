@@ -132,8 +132,25 @@ const SimpleMusicVideo = () => {
     setMediaPreview(preview);
     setMediaFile(file);
     setMediaType(isImage ? 'image' : 'video');
-    toast.success(`${file.name} uploaded (${isImage ? 'Photo' : 'Video'})`);
-  }, [mediaPreview]);
+
+    // For video input with lipsync-2, use full audio as single segment (no splitting)
+    // lipsync-2 handles longer durations better than lipsync-1.9.0-beta
+    if (isVideo && audioFile && audioDuration) {
+      setAudioSegments([{
+        id: 'segment-1',
+        index: 0,
+        startTime: 0,
+        endTime: audioDuration,
+        duration: audioDuration,
+        audioBlob: audioFile,
+        waveformData: []
+      }]);
+      setEstimatedCost(0.40);
+      toast.success(`${file.name} uploaded (Video) - Processing as 1 clip`);
+    } else {
+      toast.success(`${file.name} uploaded (${isImage ? 'Photo' : 'Video'})`);
+    }
+  }, [mediaPreview, audioFile, audioDuration]);
 
   // Upload file to Supabase storage
   const uploadToStorage = async (file: File | Blob, bucket: string, path: string): Promise<string> => {
