@@ -315,10 +315,22 @@ serve(async (req) => {
 
     if (data.done === true) {
       if (data.error) {
+        const errorMessage = data.error.message || 'Video generation failed';
+        const isContentPolicy = errorMessage.toLowerCase().includes('usage guidelines') ||
+                               errorMessage.toLowerCase().includes('content policy') ||
+                               errorMessage.toLowerCase().includes('violat') ||
+                               errorMessage.toLowerCase().includes('could not be submitted');
+        
+        console.error('Video generation failed:', errorMessage);
+        
         return new Response(
           JSON.stringify({ 
             status: 'failed',
-            error: data.error.message || 'Video generation failed'
+            error: errorMessage,
+            errorType: isContentPolicy ? 'content_policy' : 'generation_error',
+            suggestion: isContentPolicy 
+              ? 'Your prompt contains content that violates AI safety guidelines. Try using more abstract, visual descriptions without references to violence, relationships, or sensitive themes.'
+              : 'Video generation failed. Try simplifying your prompt or generating again.'
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );

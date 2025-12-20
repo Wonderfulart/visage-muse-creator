@@ -209,7 +209,14 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
             )
           );
 
-          toast.error(`Scene failed`);
+          // Show specific error message for content policy violations
+          if (data.errorType === 'content_policy') {
+            toast.error("Scene rejected: Content policy violation. Try editing the prompt to be more abstract.", {
+              duration: 6000,
+            });
+          } else {
+            toast.error(data.suggestion || `Scene generation failed`);
+          }
         }
       } catch (error) {
         console.error("Polling error:", error);

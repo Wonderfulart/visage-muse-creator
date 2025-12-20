@@ -77,7 +77,14 @@ export function GenerationPanel({
             )
           );
 
-          toast.error(`Scene ${scenes.find((s) => s.id === sceneId)?.index! + 1} failed`);
+          const sceneNum = scenes.find((s) => s.id === sceneId)?.index! + 1;
+          if (data.errorType === 'content_policy') {
+            toast.error(`Scene ${sceneNum}: Content policy violation. Edit the prompt to be more abstract.`, {
+              duration: 6000,
+            });
+          } else {
+            toast.error(data.suggestion || `Scene ${sceneNum} failed`);
+          }
         }
       } catch (error) {
         console.error("Polling error:", error);
