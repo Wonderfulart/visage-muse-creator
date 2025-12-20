@@ -49,12 +49,17 @@ export const useSubscription = () => {
 };
 
 export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
-  const { user, session } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refreshSubscription = useCallback(async () => {
+    // Wait for auth to finish loading and ensure we have a valid token
+    if (authLoading) {
+      return;
+    }
+
     if (!session?.access_token) {
       setSubscription(defaultSubscription);
       setLoading(false);
@@ -85,17 +90,22 @@ export const SubscriptionProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [session?.access_token]);
+  }, [session?.access_token, authLoading]);
 
-  // Check subscription on mount and when user changes
+  // Check subscription on mount and when user/auth state changes
   useEffect(() => {
-    if (user) {
+    // Don't check until auth is done loading
+    if (authLoading) {
+      return;
+    }
+
+    if (user && session?.access_token) {
       refreshSubscription();
     } else {
       setSubscription(null);
       setLoading(false);
     }
-  }, [user, refreshSubscription]);
+  }, [user, session?.access_token, authLoading, refreshSubscription]);
 
   // Auto-refresh every 5 minutes
   useEffect(() => {
