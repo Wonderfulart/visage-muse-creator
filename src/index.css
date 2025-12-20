@@ -263,17 +263,76 @@
   }
 
   .scrollbar-sora::-webkit-scrollbar {
-    height: 8px;
+    height: 10px;
   }
 
   .scrollbar-sora::-webkit-scrollbar-track {
-    background: hsl(0 0% 5%);
-    border-radius: 4px;
+    background: hsl(0 0% 8%);
+    border-radius: 5px;
+    margin: 0 8px;
   }
 
   .scrollbar-sora::-webkit-scrollbar-thumb {
-    background: hsl(270 70% 65% / 0.5);
-    border-radius: 4px;
+    background: linear-gradient(90deg, hsl(270 70% 55%) 0%, hsl(330 70% 55%) 100%);
+    border-radius: 5px;
+    border: 2px solid hsl(0 0% 8%);
+  }
+
+  .scrollbar-sora::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(90deg, hsl(270 70% 65%) 0%, hsl(330 70% 65%) 100%);
+  }
+
+  /* Timeline scrollbar - always visible */
+  .timeline-scroll {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(270 70% 55% / 0.6) hsl(0 0% 8%);
+  }
+
+  .timeline-scroll::-webkit-scrollbar {
+    height: 12px;
+  }
+
+  .timeline-scroll::-webkit-scrollbar-track {
+    background: hsl(0 0% 6%);
+    border-radius: 6px;
+    border: 1px solid hsl(0 0% 12%);
+  }
+
+  .timeline-scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(90deg, hsl(270 70% 50%) 0%, hsl(330 70% 50%) 100%);
+    border-radius: 6px;
+    border: 2px solid hsl(0 0% 6%);
+  }
+
+  .timeline-scroll::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(90deg, hsl(270 70% 60%) 0%, hsl(330 70% 60%) 100%);
+  }
+
+  /* Fade edges for scrollable content */
+  .scroll-fade-edges {
+    position: relative;
+  }
+
+  .scroll-fade-edges::before,
+  .scroll-fade-edges::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 12px;
+    width: 40px;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .scroll-fade-edges::before {
+    left: 0;
+    background: linear-gradient(90deg, hsl(0 0% 4%) 0%, transparent 100%);
+  }
+
+  .scroll-fade-edges::after {
+    right: 0;
+    background: linear-gradient(270deg, hsl(0 0% 4%) 0%, transparent 100%);
   }
 
   /* Timeline Track */

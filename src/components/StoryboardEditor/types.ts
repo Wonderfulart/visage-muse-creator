@@ -12,6 +12,8 @@ export interface Scene {
   videoUrl?: string;
   requestId?: string;
   selected: boolean;
+  errorType?: 'content_policy' | 'generation_error';
+  errorMessage?: string;
 }
 
 export interface StoryboardSettings {

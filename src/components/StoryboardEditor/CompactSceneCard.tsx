@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { Play, Pause, Check, Loader2, XCircle, RefreshCw, GripVertical, Music } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Play, Pause, Check, Loader2, XCircle, RefreshCw, GripVertical, Music, Wand2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Scene } from "./types";
 import { formatTime } from "@/utils/audioSplitter";
 import { cn } from "@/lib/utils";
+import { validatePrompt, sanitizePrompt, getHighlightedSegments, applyReplacement, ValidationIssue } from "@/utils/promptValidator";
+import { PromptValidationPanel, ValidationIndicator } from "@/components/PromptValidationPanel";
 
 interface CompactSceneCardProps {
   scene: Scene;
@@ -13,6 +15,7 @@ interface CompactSceneCardProps {
   onUpdatePrompt: (id: string, prompt: string) => void;
   onPlayAudio?: (scene: Scene) => void;
   onRetry?: (scene: Scene) => void;
+  onRegenerateWithSafePrompt?: (scene: Scene, safePrompt: string) => void;
   isPlaying?: boolean;
   disabled?: boolean;
   showVideo?: boolean;
@@ -37,6 +40,7 @@ export function CompactSceneCard({
   onUpdatePrompt,
   onPlayAudio,
   onRetry,
+  onRegenerateWithSafePrompt,
   isPlaying,
   disabled,
   showVideo = false,
@@ -49,10 +53,35 @@ export function CompactSceneCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editedPrompt, setEditedPrompt] = useState(scene.prompt);
   const [isHovering, setIsHovering] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
+
+  // Memoized validation
+  const validation = useMemo(() => validatePrompt(editedPrompt), [editedPrompt]);
+  const promptSegments = useMemo(() => getHighlightedSegments(editedPrompt), [editedPrompt]);
+  const safePrompt = useMemo(() => sanitizePrompt(scene.prompt), [scene.prompt]);
+  const hasIssues = validation.issues.length > 0;
+  const hasErrors = validation.issues.some(i => i.severity === 'error');
 
   const handleSavePrompt = () => {
     onUpdatePrompt(scene.id, editedPrompt);
     setIsEditing(false);
+    setShowValidation(false);
+  };
+
+  const handleApplyReplacement = (issue: ValidationIssue) => {
+    setEditedPrompt(prev => applyReplacement(prev, issue));
+  };
+
+  const handleApplyAllFixes = () => {
+    setEditedPrompt(sanitizePrompt(editedPrompt));
+  };
+
+  const handleRegenerateWithSafe = () => {
+    if (onRegenerateWithSafePrompt && safePrompt !== scene.prompt) {
+      onRegenerateWithSafePrompt(scene, safePrompt);
+    } else if (onRetry) {
+      onRetry(scene);
+    }
   };
 
   const gradientClass = gradientClasses[scene.index % gradientClasses.length];
@@ -103,9 +132,25 @@ export function CompactSceneCard({
             ) : scene.status === "completed" ? (
               <Check className="w-8 h-8 text-white" />
             ) : scene.status === "failed" ? (
-              <div className="flex flex-col items-center gap-2">
-                <XCircle className="w-6 h-6 text-white/80" />
-                {onRetry && (
+              <div className="flex flex-col items-center gap-2 px-3 text-center">
+                <XCircle className="w-6 h-6 text-red-400" />
+                <p className="text-[10px] text-white/80 leading-tight">
+                  {scene.errorType === 'content_policy' ? 'Content policy violation' : 'Generation failed'}
+                </p>
+                {safePrompt !== scene.prompt ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRegenerateWithSafe();
+                    }}
+                    className="h-6 text-[10px] px-2 bg-primary/80 hover:bg-primary text-white border-0"
+                  >
+                    <Wand2 className="w-3 h-3 mr-1" />
+                    Fix & Retry
+                  </Button>
+                ) : onRetry && (
                   <Button
                     size="sm"
                     variant="secondary"
@@ -113,7 +158,7 @@ export function CompactSceneCard({
                       e.stopPropagation();
                       onRetry(scene);
                     }}
-                    className="h-6 text-xs px-2 bg-white/20 hover:bg-white/30 text-white border-0"
+                    className="h-6 text-[10px] px-2 bg-white/20 hover:bg-white/30 text-white border-0"
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     Retry
@@ -167,9 +212,12 @@ export function CompactSceneCard({
       <div className="p-3 space-y-2">
         {/* Header Row */}
         <div className="flex items-center justify-between">
-          <span className="text-[13px] font-semibold text-foreground">
-            Scene {scene.index + 1}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] font-semibold text-foreground">
+              Scene {scene.index + 1}
+            </span>
+            {scene.prompt && <ValidationIndicator prompt={scene.prompt} />}
+          </div>
           <span className="text-[11px] text-muted-foreground font-mono">
             {formatTime(scene.startTime)}-{Math.round(scene.duration)}s
           </span>
@@ -193,26 +241,73 @@ export function CompactSceneCard({
         {/* Prompt */}
         {isEditing ? (
           <div className="space-y-2">
+            {/* Highlighted prompt preview when has issues */}
+            {hasIssues && (
+              <div className="p-2 rounded bg-secondary/30 border border-border text-[11px] leading-relaxed">
+                {promptSegments.map((segment, i) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      segment.type === 'error' && "bg-destructive/30 text-destructive px-0.5 rounded font-medium",
+                      segment.type === 'warning' && "bg-yellow-500/20 text-yellow-400 px-0.5 rounded"
+                    )}
+                  >
+                    {segment.text}
+                  </span>
+                ))}
+              </div>
+            )}
+            
             <Textarea
               value={editedPrompt}
               onChange={(e) => setEditedPrompt(e.target.value)}
-              className="text-[11px] min-h-[50px] resize-none p-2 bg-secondary/50 border-border"
+              className={cn(
+                "text-[11px] min-h-[50px] resize-none p-2 bg-secondary/50",
+                hasErrors ? "border-destructive/50" : "border-border"
+              )}
               placeholder="Scene prompt..."
             />
+            
+            {/* Validation panel */}
+            {hasIssues && (
+              <PromptValidationPanel
+                prompt={editedPrompt}
+                onApplyReplacement={handleApplyReplacement}
+                onApplyAll={handleApplyAllFixes}
+                compact
+              />
+            )}
+            
             <div className="flex gap-1">
               <Button
                 size="sm"
                 onClick={handleSavePrompt}
-                className="h-6 text-[10px] px-2 btn-gradient-primary"
+                className={cn(
+                  "h-6 text-[10px] px-2",
+                  hasErrors ? "bg-yellow-600 hover:bg-yellow-500" : "btn-gradient-primary"
+                )}
               >
-                Save
+                {hasErrors ? "Save Anyway" : "Save"}
               </Button>
+              {hasErrors && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    handleApplyAllFixes();
+                  }}
+                  className="h-6 text-[10px] px-2 btn-gradient-primary"
+                >
+                  <Wand2 className="w-3 h-3 mr-1" />
+                  Fix All
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => {
                   setEditedPrompt(scene.prompt);
                   setIsEditing(false);
+                  setShowValidation(false);
                 }}
                 className="h-6 text-[10px] px-2"
               >
@@ -221,9 +316,18 @@ export function CompactSceneCard({
             </div>
           </div>
         ) : (
-          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-            "{scene.prompt || "Click Edit to add prompt..."}"
-          </p>
+          <div className="space-y-1">
+            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+              "{scene.prompt || "Click Edit to add prompt..."}"
+            </p>
+            {/* Show issue hint on non-editing state */}
+            {scene.prompt && hasErrors && (
+              <div className="flex items-center gap-1 text-[10px] text-destructive">
+                <AlertTriangle className="w-3 h-3" />
+                <span>Contains flagged words</span>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Edit Button */}

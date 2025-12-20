@@ -205,7 +205,12 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
 
           setScenes(prev =>
             prev.map((s) =>
-              s.id === sceneId ? { ...s, status: "failed" } : s
+              s.id === sceneId ? { 
+                ...s, 
+                status: "failed",
+                errorType: data.errorType || 'generation_error',
+                errorMessage: data.error || data.suggestion
+              } : s
             )
           );
 
@@ -322,7 +327,7 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
   const retryFailedScene = async (scene: Scene) => {
     setScenes(prev =>
       prev.map((s) =>
-        s.id === scene.id ? { ...s, status: "generating" } : s
+        s.id === scene.id ? { ...s, status: "generating", errorType: undefined, errorMessage: undefined } : s
       )
     );
 
@@ -362,6 +367,54 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
         )
       );
       toast.error(`Failed to retry scene ${scene.index + 1}`);
+    }
+  };
+
+  // Regenerate with a sanitized prompt
+  const regenerateWithSafePrompt = async (scene: Scene, safePrompt: string) => {
+    // First update the prompt
+    setScenes(prev =>
+      prev.map((s) =>
+        s.id === scene.id ? { ...s, prompt: safePrompt, status: "generating", errorType: undefined, errorMessage: undefined } : s
+      )
+    );
+
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-batch-videos", {
+        body: {
+          scenes: [{
+            id: scene.id,
+            order: scene.index + 1,
+            prompt: safePrompt,
+            duration: Math.min(Math.max(scene.duration, 5), 8),
+          }],
+          referenceImage: settings.referenceImage,
+          preserveFace: settings.preserveFace,
+          aspectRatio: settings.aspectRatio,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.operations?.[0]?.success) {
+        pollSceneStatus(scene.id, data.operations[0].requestId);
+        setScenes(prev =>
+          prev.map((s) =>
+            s.id === scene.id ? { ...s, requestId: data.operations[0].requestId } : s
+          )
+        );
+        toast.success(`Regenerating scene ${scene.index + 1} with safer prompt`);
+      } else {
+        throw new Error(data.operations?.[0]?.error || "Failed to regenerate");
+      }
+    } catch (error) {
+      console.error("Regenerate error:", error);
+      setScenes(prev =>
+        prev.map((s) =>
+          s.id === scene.id ? { ...s, status: "failed" } : s
+        )
+      );
+      toast.error(`Failed to regenerate scene ${scene.index + 1}`);
     }
   };
 
@@ -613,8 +666,8 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
         {/* Scene Cards Strip */}
         {hasAudio && (
           <div className="space-y-6">
-            <ScrollArea className="w-full">
-              <div className="flex gap-4 pb-4 scrollbar-sora" onDragEnd={handleDragEnd}>
+            <div className="scroll-fade-edges">
+              <div className="flex gap-4 pb-4 overflow-x-auto timeline-scroll" onDragEnd={handleDragEnd}>
                 {scenes.map((scene) => (
                   <CompactSceneCard
                     key={scene.id}
@@ -623,6 +676,7 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
                     onUpdatePrompt={updatePrompt}
                     onPlayAudio={playSceneAudio}
                     onRetry={retryFailedScene}
+                    onRegenerateWithSafePrompt={regenerateWithSafePrompt}
                     isPlaying={playingSceneId === scene.id}
                     disabled={!scene.selected && selectedScenes.length >= maxScenes}
                     showVideo={scene.status === "completed"}
@@ -635,13 +689,12 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
                 ))}
                 
                 {/* Add Scene Card */}
-                <div className="add-scene-card h-[calc(112px+120px)]">
+                <div className="add-scene-card flex-shrink-0 h-[calc(112px+120px)]">
                   <Plus className="w-8 h-8 text-muted-foreground mb-2" />
                   <span className="text-sm text-muted-foreground">Add Scene</span>
                 </div>
               </div>
-              <ScrollBar orientation="horizontal" />
-            </ScrollArea>
+            </div>
           </div>
         )}
       </div>
