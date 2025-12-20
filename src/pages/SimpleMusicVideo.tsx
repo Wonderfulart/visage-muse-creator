@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Music, Image, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight } from "lucide-react";
+import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { splitAudio, AudioSegment, formatTime } from "@/utils/audioSplitter";
 
 type Step = 1 | 2 | 3 | 4;
+type MediaType = 'image' | 'video' | null;
 
 interface GeneratedClip {
   id: string;
@@ -26,10 +27,11 @@ const SimpleMusicVideo = () => {
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
   
-  // Image state
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  // Media state (photo or video)
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaType, setMediaType] = useState<MediaType>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [uploadedMediaUrl, setUploadedMediaUrl] = useState<string | null>(null);
   
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -47,15 +49,15 @@ const SimpleMusicVideo = () => {
   
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
-      if (imagePreview) URL.revokeObjectURL(imagePreview);
+      if (mediaPreview) URL.revokeObjectURL(mediaPreview);
     };
-  }, [imagePreview]);
+  }, [mediaPreview]);
 
   // Handle audio upload with splitting
   const handleAudioUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,22 +114,26 @@ const SimpleMusicVideo = () => {
     };
   }, []);
 
-  // Handle image upload
-  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle media upload (photo or video)
+  const handleMediaUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      toast.error("Please upload an image file");
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+
+    if (!isImage && !isVideo) {
+      toast.error("Please upload an image or video file");
       return;
     }
 
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    if (mediaPreview) URL.revokeObjectURL(mediaPreview);
     const preview = URL.createObjectURL(file);
-    setImagePreview(preview);
-    setImageFile(file);
-    toast.success(`${file.name} uploaded`);
-  }, [imagePreview]);
+    setMediaPreview(preview);
+    setMediaFile(file);
+    setMediaType(isImage ? 'image' : 'video');
+    toast.success(`${file.name} uploaded (${isImage ? 'Photo' : 'Video'})`);
+  }, [mediaPreview]);
 
   // Upload file to Supabase storage
   const uploadToStorage = async (file: File | Blob, bucket: string, path: string): Promise<string> => {
@@ -151,8 +157,8 @@ const SimpleMusicVideo = () => {
 
   // Start generation for all segments
   const handleGenerate = async () => {
-    if (!audioFile || !imageFile || audioSegments.length === 0) {
-      toast.error("Please upload both audio and image");
+    if (!audioFile || !mediaFile || audioSegments.length === 0) {
+      toast.error("Please upload both audio and a photo/video");
       return;
     }
 
@@ -162,19 +168,22 @@ const SimpleMusicVideo = () => {
     setGeneratedClips([]);
     setCurrentSegmentIndex(0);
 
+    // Determine which model to use based on media type
+    const selectedModel = mediaType === 'video' ? 'lipsync-2' : 'lipsync-1.9.0-beta';
+
     try {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) throw new Error("Not authenticated");
 
-      // Upload character image first
-      setStatusMessage("Uploading photo...");
+      // Upload character media first
+      setStatusMessage(`Uploading ${mediaType === 'video' ? 'video' : 'photo'}...`);
       setProgress(10);
-      const imageUrl = await uploadToStorage(
-        imageFile,
+      const mediaUrl = await uploadToStorage(
+        mediaFile,
         'videos',
-        `lipsync-character-${Date.now()}.${imageFile.name.split('.').pop()}`
+        `lipsync-character-${Date.now()}.${mediaFile.name.split('.').pop()}`
       );
-      setUploadedImageUrl(imageUrl);
+      setUploadedMediaUrl(mediaUrl);
 
       // Create database record for this video
       const { data: videoRecord, error: videoError } = await supabase
@@ -182,7 +191,7 @@ const SimpleMusicVideo = () => {
         .insert({
           user_id: userData.user.id,
           title: audioFile.name.replace(/\.[^/.]+$/, ''),
-          character_image_url: imageUrl,
+          character_image_url: mediaUrl,
           status: 'processing',
           total_segments: audioSegments.length,
           completed_segments: 0,
@@ -231,9 +240,9 @@ const SimpleMusicVideo = () => {
         // Start lip-sync generation for this segment
         const { data: genData, error: genError } = await supabase.functions.invoke('generate-lipsync-syncso', {
           body: {
-            characterImageUrl: imageUrl,
+            characterImageUrl: mediaUrl,
             audioUrl: segmentAudioUrl,
-            model: 'lipsync-2'
+            model: selectedModel
           }
         });
 
@@ -356,9 +365,10 @@ const SimpleMusicVideo = () => {
     setAudioFile(null);
     setAudioDuration(null);
     setAudioSegments([]);
-    setImageFile(null);
-    setImagePreview(null);
-    setUploadedImageUrl(null);
+    setMediaFile(null);
+    setMediaType(null);
+    setMediaPreview(null);
+    setUploadedMediaUrl(null);
     setIsGenerating(false);
     setProgress(0);
     setStatusMessage("");
@@ -470,12 +480,12 @@ const SimpleMusicVideo = () => {
             </div>
           )}
 
-          {/* Step 2: Upload Photo */}
+          {/* Step 2: Upload Photo or Video */}
           {step === 2 && (
             <div className="text-center space-y-8 animate-fade-in max-w-2xl mx-auto">
               <div>
                 <h2 className="font-heading text-3xl font-bold text-gray-900 mb-2">
-                  Step 2: Upload a Photo
+                  Step 2: Upload a Photo or Video
                 </h2>
                 <p className="text-lg text-gray-600">
                   This person will sing your song
@@ -483,44 +493,78 @@ const SimpleMusicVideo = () => {
               </div>
 
               <div
-                onClick={() => imageInputRef.current?.click()}
+                onClick={() => mediaInputRef.current?.click()}
                 className={`
                   border-2 border-dashed rounded-2xl p-16 cursor-pointer transition-all
-                  ${imageFile 
+                  ${mediaFile 
                     ? 'border-green-500 bg-green-50' 
                     : 'border-gray-300 hover:border-purple-500 hover:bg-purple-50'
                   }
                 `}
               >
                 <input
-                  ref={imageInputRef}
+                  ref={mediaInputRef}
                   type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
+                  accept="image/*,video/*"
+                  onChange={handleMediaUpload}
                   className="hidden"
                 />
                 
-                {imagePreview ? (
+                {mediaPreview ? (
                   <div className="space-y-4">
-                    <img 
-                      src={imagePreview} 
-                      alt="Character preview" 
-                      className="w-48 h-48 object-cover rounded-xl mx-auto border-4 border-white shadow-lg"
-                    />
-                    <p className="text-lg font-semibold text-gray-900">{imageFile?.name}</p>
+                    {mediaType === 'video' ? (
+                      <video 
+                        src={mediaPreview} 
+                        className="w-48 h-48 object-cover rounded-xl mx-auto border-4 border-white shadow-lg"
+                        muted
+                        loop
+                        autoPlay
+                        playsInline
+                      />
+                    ) : (
+                      <img 
+                        src={mediaPreview} 
+                        alt="Character preview" 
+                        className="w-48 h-48 object-cover rounded-xl mx-auto border-4 border-white shadow-lg"
+                      />
+                    )}
+                    <div>
+                      <p className="text-lg font-semibold text-gray-900">{mediaFile?.name}</p>
+                      <p className="text-sm text-purple-600 font-medium">
+                        {mediaType === 'video' ? '🎬 Video mode (lipsync-2)' : '📷 Photo mode (lipsync-1.9.0-beta)'}
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="w-20 h-20 rounded-full bg-purple-100 mx-auto flex items-center justify-center">
-                      <Image className="w-10 h-10 text-purple-600" />
+                      <div className="flex gap-1">
+                        <Image className="w-6 h-6 text-purple-600" />
+                        <Video className="w-6 h-6 text-purple-600" />
+                      </div>
                     </div>
                     <div>
-                      <p className="text-xl font-semibold text-gray-900">Click to Upload Photo</p>
-                      <p className="text-gray-500">Clear face photo recommended</p>
+                      <p className="text-xl font-semibold text-gray-900">Click to Upload Photo or Video</p>
+                      <p className="text-gray-500">Clear face recommended • Video gives better lip-sync quality</p>
                     </div>
                   </div>
                 )}
               </div>
+
+              {/* Model info */}
+              {mediaFile && (
+                <div className="bg-purple-50 rounded-xl p-4 text-left">
+                  <p className="font-medium text-purple-900">
+                    {mediaType === 'video' ? '🎬 Video Input' : '📷 Photo Input'}
+                  </p>
+                  <p className="text-sm text-purple-700">
+                    {mediaType === 'video' 
+                      ? 'Using lipsync-2 model for best quality video-to-video lip-sync'
+                      : 'Using lipsync-1.9.0-beta model for image-to-video generation'
+                    }
+                  </p>
+                </div>
+              )}
 
               {/* Cost estimate */}
               <div className="bg-gray-100 rounded-xl p-4 space-y-1">
@@ -545,7 +589,7 @@ const SimpleMusicVideo = () => {
                 </Button>
                 <Button
                   onClick={handleGenerate}
-                  disabled={!imageFile}
+                  disabled={!mediaFile}
                   className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
                 >
                   Create My Video
