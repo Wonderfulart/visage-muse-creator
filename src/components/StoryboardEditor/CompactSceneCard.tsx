@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Pause, Check, Loader2, XCircle, RefreshCw, Edit2 } from "lucide-react";
+import { Play, Pause, Check, Loader2, XCircle, RefreshCw, Edit2, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,11 @@ interface CompactSceneCardProps {
   isPlaying?: boolean;
   disabled?: boolean;
   showVideo?: boolean;
+  onDragStart?: (e: React.DragEvent, scene: Scene) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent, scene: Scene) => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
 }
 
 export function CompactSceneCard({
@@ -27,6 +32,11 @@ export function CompactSceneCard({
   isPlaying,
   disabled,
   showVideo = false,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  isDragging,
+  isDragOver,
 }: CompactSceneCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedPrompt, setEditedPrompt] = useState(scene.prompt);
@@ -39,13 +49,22 @@ export function CompactSceneCard({
 
   return (
     <div
+      draggable={!isEditing}
+      onDragStart={(e) => onDragStart?.(e, scene)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver?.(e);
+      }}
+      onDrop={(e) => onDrop?.(e, scene)}
       className={cn(
         "group relative flex-shrink-0 w-48 rounded-lg overflow-hidden transition-all duration-200",
-        "border bg-card/50 hover:bg-card/80",
+        "border bg-card/50 hover:bg-card/80 cursor-grab active:cursor-grabbing",
         scene.selected
           ? "border-primary/60 ring-1 ring-primary/30"
           : "border-border/40 hover:border-border",
-        disabled && "opacity-40 pointer-events-none"
+        disabled && "opacity-40 pointer-events-none",
+        isDragging && "opacity-50 scale-95",
+        isDragOver && "ring-2 ring-primary border-primary"
       )}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
@@ -114,8 +133,11 @@ export function CompactSceneCard({
           </div>
         )}
 
-        {/* Selection Checkbox */}
-        <div className="absolute top-2 left-2">
+        {/* Drag Handle & Selection Checkbox */}
+        <div className="absolute top-2 left-2 flex items-center gap-1">
+          <div className="p-0.5 rounded bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab">
+            <GripVertical className="w-3 h-3 text-muted-foreground" />
+          </div>
           <Checkbox
             checked={scene.selected}
             onCheckedChange={() => onToggleSelect(scene.id)}

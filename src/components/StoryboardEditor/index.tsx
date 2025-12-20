@@ -373,6 +373,55 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
     );
   };
 
+  // Drag and drop state
+  const [draggedScene, setDraggedScene] = useState<Scene | null>(null);
+  const [dragOverSceneId, setDragOverSceneId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, scene: Scene) => {
+    setDraggedScene(scene);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", scene.id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, sceneId: string) => {
+    e.preventDefault();
+    if (draggedScene && draggedScene.id !== sceneId) {
+      setDragOverSceneId(sceneId);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetScene: Scene) => {
+    e.preventDefault();
+    if (!draggedScene || draggedScene.id === targetScene.id) {
+      setDraggedScene(null);
+      setDragOverSceneId(null);
+      return;
+    }
+
+    setScenes(prev => {
+      const newScenes = [...prev];
+      const draggedIndex = newScenes.findIndex(s => s.id === draggedScene.id);
+      const targetIndex = newScenes.findIndex(s => s.id === targetScene.id);
+      
+      // Remove dragged scene
+      const [removed] = newScenes.splice(draggedIndex, 1);
+      // Insert at target position
+      newScenes.splice(targetIndex, 0, removed);
+      
+      // Update indices
+      return newScenes.map((scene, i) => ({ ...scene, index: i }));
+    });
+
+    setDraggedScene(null);
+    setDragOverSceneId(null);
+    toast.success("Scene reordered");
+  };
+
+  const handleDragEnd = () => {
+    setDraggedScene(null);
+    setDragOverSceneId(null);
+  };
+
   const updatePrompt = (id: string, prompt: string) => {
     setScenes(prev =>
       prev.map((s) => (s.id === id ? { ...s, prompt } : s))
@@ -604,7 +653,7 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
               </div>
 
               <ScrollArea className="w-full">
-                <div className="flex gap-3 pb-4">
+                <div className="flex gap-3 pb-4" onDragEnd={handleDragEnd}>
                   {scenes.map((scene) => (
                     <CompactSceneCard
                       key={scene.id}
@@ -616,6 +665,11 @@ export function StoryboardEditor({ onComplete }: StoryboardEditorProps) {
                       isPlaying={playingSceneId === scene.id}
                       disabled={!scene.selected && selectedScenes.length >= maxScenes}
                       showVideo={scene.status === "completed"}
+                      onDragStart={handleDragStart}
+                      onDragOver={(e) => handleDragOver(e, scene.id)}
+                      onDrop={handleDrop}
+                      isDragging={draggedScene?.id === scene.id}
+                      isDragOver={dragOverSceneId === scene.id}
                     />
                   ))}
                 </div>
