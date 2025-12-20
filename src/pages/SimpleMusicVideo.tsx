@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight, FileText, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
+import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight, FileText, Sparkles, ChevronDown, ChevronUp, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { splitAudio, AudioSegment, formatTime } from "@/utils/audioSplitter";
 import { parseLyrics, LyricSection } from "@/utils/lyricsParser";
 import { stitchVideos, StitchProgress } from "@/utils/videoStitcher";
+import { downloadClipsAsZip } from "@/utils/zipDownloader";
 
 type Step = 1 | 2 | 3 | 4;
 type MediaType = 'image' | 'video' | null;
@@ -61,6 +62,8 @@ const SimpleMusicVideo = () => {
   const [statusMessage, setStatusMessage] = useState("");
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [estimatedCost, setEstimatedCost] = useState<number>(0);
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+  const [zipProgress, setZipProgress] = useState(0);
   
   // Generated clips (for lipsync mode)
   const [generatedClips, setGeneratedClips] = useState<GeneratedClip[]>([]);
@@ -680,6 +683,33 @@ const SimpleMusicVideo = () => {
   // Get ordered clips
   const orderedClips = clipOrder.map(i => generatedClips[i]).filter(Boolean);
 
+  // Download clips as ZIP file
+  const handleDownloadZip = async (clips: { url: string; index: number }[], prefix: string = 'clip') => {
+    if (clips.length === 0) return;
+    
+    setIsDownloadingZip(true);
+    setZipProgress(0);
+    
+    try {
+      const clipsForZip = clips.map((clip, i) => ({
+        url: clip.url,
+        filename: `${prefix}-${i + 1}.mp4`
+      }));
+      
+      await downloadClipsAsZip(clipsForZip, 'music-video-clips.zip', (progress) => {
+        setZipProgress(progress);
+      });
+      
+      toast.success('ZIP download complete!');
+    } catch (error) {
+      console.error('ZIP download error:', error);
+      toast.error('Failed to create ZIP file');
+    } finally {
+      setIsDownloadingZip(false);
+      setZipProgress(0);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
@@ -1030,7 +1060,7 @@ Under the neon lights..."
             </div>
           )}
 
-          {/* Step 4: Complete with Reordering */}
+          {/* Step 4: Complete - Lipsync Mode */}
           {step === 4 && generatedClips.length > 0 && (
             <div className="text-center space-y-8 animate-fade-in">
               <div>
@@ -1139,22 +1169,57 @@ Under the neon lights..."
 
               {/* Actions */}
               <div className="flex gap-4 justify-center flex-wrap">
+                {generatedClips.length > 1 && (
+                  <Button
+                    onClick={() => handleDownloadZip(
+                      orderedClips.map((c, i) => ({ url: c.outputUrl, index: i })),
+                      'clip'
+                    )}
+                    disabled={isDownloadingZip}
+                    className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700"
+                  >
+                    {isDownloadingZip ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        Downloading... {zipProgress.toFixed(0)}%
+                      </>
+                    ) : (
+                      <>
+                        <Archive className="w-5 h-5 mr-2" />
+                        Download as ZIP
+                      </>
+                    )}
+                  </Button>
+                )}
+                
                 <Button
                   onClick={() => {
-                    orderedClips.forEach((clip, i) => {
-                      setTimeout(() => {
-                        const link = document.createElement('a');
-                        link.href = clip.outputUrl;
-                        link.download = `clip-${i + 1}.mp4`;
-                        link.target = '_blank';
-                        link.click();
-                      }, i * 500);
-                    });
+                    if (generatedClips.length === 1) {
+                      const link = document.createElement('a');
+                      link.href = generatedClips[0].outputUrl;
+                      link.download = 'music-video.mp4';
+                      link.target = '_blank';
+                      link.click();
+                    } else {
+                      orderedClips.forEach((clip, i) => {
+                        setTimeout(() => {
+                          const link = document.createElement('a');
+                          link.href = clip.outputUrl;
+                          link.download = `clip-${i + 1}.mp4`;
+                          link.target = '_blank';
+                          link.click();
+                        }, i * 500);
+                      });
+                    }
                   }}
-                  className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700"
+                  variant={generatedClips.length > 1 ? "outline" : "default"}
+                  className={generatedClips.length > 1 
+                    ? "h-14 px-8 text-lg font-semibold" 
+                    : "h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700"
+                  }
                 >
                   <Download className="w-5 h-5 mr-2" />
-                  {generatedClips.length > 1 ? 'Download All Clips' : 'Download Video'}
+                  {generatedClips.length > 1 ? 'Download Individually' : 'Download Video'}
                 </Button>
                 
                 <Button
@@ -1170,6 +1235,110 @@ Under the neon lights..."
               {/* Cost summary */}
               <p className="text-gray-500">
                 Total cost: ${estimatedCost.toFixed(2)} for {generatedClips.length} clip{generatedClips.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
+
+          {/* Step 4: Complete - Lyrics Mode */}
+          {step === 4 && finalVideoUrl && lyricsSceneClips.length > 0 && (
+            <div className="text-center space-y-8 animate-fade-in">
+              <div>
+                <h2 className="font-heading text-3xl font-bold text-gray-900 mb-2">
+                  🎬 Your Music Video Is Ready!
+                </h2>
+                <p className="text-lg text-gray-600">
+                  Download your complete music video or get individual scenes
+                </p>
+              </div>
+
+              {/* Final video preview */}
+              <div className="rounded-2xl overflow-hidden shadow-xl border border-gray-200 max-w-2xl mx-auto">
+                <video
+                  src={finalVideoUrl}
+                  controls
+                  autoPlay
+                  className="w-full aspect-[9/16] bg-black max-h-[70vh]"
+                />
+              </div>
+
+              {/* Scene thumbnails */}
+              {lyricsSceneClips.length > 1 && (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">Individual scenes ({lyricsSceneClips.length} clips)</p>
+                  <div className="flex gap-3 overflow-x-auto pb-4 px-4 justify-center">
+                    {lyricsSceneClips.map((clip, i) => (
+                      <div 
+                        key={clip.id}
+                        className="flex-shrink-0 bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm w-32"
+                      >
+                        <video
+                          src={clip.videoUrl}
+                          className="w-full aspect-video bg-black"
+                          muted
+                        />
+                        <div className="p-2 text-center">
+                          <p className="text-xs font-medium text-gray-700">Scene {i + 1}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-4 justify-center flex-wrap">
+                <Button
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = finalVideoUrl;
+                    link.download = 'music-video.mp4';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700"
+                >
+                  <Download className="w-5 h-5 mr-2" />
+                  Download Music Video
+                </Button>
+                
+                {lyricsSceneClips.length > 1 && (
+                  <Button
+                    onClick={() => handleDownloadZip(
+                      lyricsSceneClips.map((c, i) => ({ url: c.videoUrl, index: i })),
+                      'scene'
+                    )}
+                    disabled={isDownloadingZip}
+                    variant="outline"
+                    className="h-14 px-8 text-lg font-semibold"
+                  >
+                    {isDownloadingZip ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        Downloading... {zipProgress.toFixed(0)}%
+                      </>
+                    ) : (
+                      <>
+                        <Archive className="w-5 h-5 mr-2" />
+                        Download Scenes as ZIP
+                      </>
+                    )}
+                  </Button>
+                )}
+                
+                <Button
+                  onClick={handleReset}
+                  variant="outline"
+                  className="h-14 px-8 text-lg font-semibold"
+                >
+                  <RotateCcw className="w-5 h-5 mr-2" />
+                  Make Another Video
+                </Button>
+              </div>
+
+              {/* Cost summary */}
+              <p className="text-gray-500">
+                Total cost: ${estimatedCost.toFixed(2)} for {lyricsSceneClips.length} scene{lyricsSceneClips.length !== 1 ? 's' : ''}
               </p>
             </div>
           )}
