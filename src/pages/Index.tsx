@@ -443,10 +443,26 @@ const Index = () => {
               <br />
               <span className="text-foreground">Music Videos</span>
             </h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto">
+            <p className="text-muted-foreground max-w-2xl mx-auto mb-6">
               The only AI that understands your lyrics. Create professional music videos with scenes perfectly synced to
               your song's emotion.
             </p>
+            
+            {/* New Simple Interface Link */}
+            <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-2xl p-4 max-w-lg mx-auto">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-left">
+                  <p className="font-semibold text-foreground">🎵 Try Simple Lip-Sync Mode</p>
+                  <p className="text-sm text-muted-foreground">Make anyone sing your song in 3 easy steps</p>
+                </div>
+                <Button 
+                  onClick={() => navigate('/simple')}
+                  className="bg-purple-600 hover:bg-purple-700 whitespace-nowrap"
+                >
+                  Try Now
+                </Button>
+              </div>
+            </div>
           </div>
 
           {/* Generation Mode Tabs - Simplified to 3 */}

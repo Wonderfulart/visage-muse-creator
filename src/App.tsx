@@ -16,6 +16,7 @@ import CheckoutSuccess from "./pages/CheckoutSuccess";
 import CheckoutCancel from "./pages/CheckoutCancel";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
+import SimpleMusicVideo from "./pages/SimpleMusicVideo";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/app" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+              <Route path="/simple" element={<ProtectedRoute><SimpleMusicVideo /></ProtectedRoute>} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
