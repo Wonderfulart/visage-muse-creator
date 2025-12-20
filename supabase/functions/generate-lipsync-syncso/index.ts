@@ -33,13 +33,17 @@ serve(async (req) => {
 
     if (action === 'generate') {
       // Generate lip-sync video
-      const { characterImageUrl, audioUrl, model = 'lipsync-2' }: GenerateRequest = await req.json();
+      const { characterImageUrl, audioUrl, model = 'lipsync-1.9.0-beta' }: GenerateRequest = await req.json();
 
       console.log('Starting lip-sync generation:', { characterImageUrl, audioUrl, model });
 
       if (!characterImageUrl || !audioUrl) {
         throw new Error('characterImageUrl and audioUrl are required');
       }
+
+      // lipsync-1.9.0-beta supports image input for image-to-video
+      // lipsync-2 requires video input
+      const inputType = model === 'lipsync-2' ? 'video' : 'image';
 
       const response = await fetch('https://api.sync.so/v2/generate', {
         method: 'POST',
@@ -50,7 +54,7 @@ serve(async (req) => {
         body: JSON.stringify({
           model,
           input: [
-            { type: 'image', url: characterImageUrl },
+            { type: inputType, url: characterImageUrl },
             { type: 'audio', url: audioUrl }
           ]
         }),
