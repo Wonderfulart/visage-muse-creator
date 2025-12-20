@@ -59,6 +59,38 @@ const SimpleMusicVideo = () => {
     };
   }, [mediaPreview]);
 
+  // Recalculate segments when mediaType changes
+  useEffect(() => {
+    if (!audioFile || !audioDuration) return;
+    
+    if (mediaType === 'video') {
+      // Video mode: always use single segment (lipsync-2 handles longer durations)
+      setAudioSegments([{
+        id: 'segment-1',
+        index: 0,
+        startTime: 0,
+        endTime: audioDuration,
+        duration: audioDuration,
+        audioBlob: audioFile,
+        waveformData: []
+      }]);
+      setEstimatedCost(0.40);
+    } else if (mediaType === 'image' && audioDuration > 8) {
+      // Image mode with long audio: re-split
+      setStatusMessage("Splitting audio into segments...");
+      splitAudio(audioFile, 8, (splitProgress) => {
+        setStatusMessage(`Splitting audio... ${splitProgress.toFixed(0)}%`);
+      }).then(result => {
+        setAudioSegments(result.segments);
+        setEstimatedCost(result.segments.length * 0.40);
+        setStatusMessage("");
+      }).catch(error => {
+        console.error('Split error:', error);
+        toast.error("Failed to split audio");
+      });
+    }
+  }, [mediaType, audioFile, audioDuration]);
+
   // Handle audio upload with splitting
   const handleAudioUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -83,7 +115,22 @@ const SimpleMusicVideo = () => {
       setAudioDuration(duration);
       URL.revokeObjectURL(audio.src);
 
-      // Split audio if longer than 8 seconds
+      // If video is already selected, use single segment (lipsync-2)
+      if (mediaType === 'video') {
+        setAudioSegments([{
+          id: 'segment-1',
+          index: 0,
+          startTime: 0,
+          endTime: duration,
+          duration: duration,
+          audioBlob: file,
+          waveformData: []
+        }]);
+        setEstimatedCost(0.40);
+        return;
+      }
+
+      // Split audio if longer than 8 seconds (for image mode)
       if (duration > 8) {
         setStatusMessage("Splitting audio into segments...");
         try {
@@ -112,7 +159,7 @@ const SimpleMusicVideo = () => {
         setEstimatedCost(0.40);
       }
     };
-  }, []);
+  }, [mediaType]);
 
   // Handle media upload (photo or video)
   const handleMediaUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
