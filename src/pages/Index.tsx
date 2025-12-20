@@ -794,9 +794,46 @@ const Index = () => {
             <TabsContent value="auto-detect" className="space-y-6 mt-6">
               <div className="grid lg:grid-cols-2 gap-6">
                 <div className="space-y-6">
-                  {/* Reference Image */}
+                  {/* Audio Upload for Auto Detect */}
                   <div className="card-elevated rounded-2xl p-6">
-                    <ReferenceImageUpload onImageChange={setReferenceImage} aspectRatio={aspectRatio} />
+                    <div className="flex items-center gap-2 mb-4">
+                      <Music className="w-5 h-5 text-primary" />
+                      <h3 className="font-heading font-semibold text-foreground">Upload Audio</h3>
+                    </div>
+                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer border-border hover:border-primary/50 bg-secondary/30 transition-colors">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <Music className="w-8 h-8 mb-2 text-muted-foreground" />
+                        <p className="mb-2 text-sm text-foreground">
+                          {audioFile ? audioFile.name : <span><span className="font-semibold">Click to upload</span> or drag and drop</span>}
+                        </p>
+                        <p className="text-xs text-muted-foreground">MP3, WAV, M4A (MAX. 50MB)</p>
+                      </div>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="audio/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setAudioFile(file);
+                            const url = URL.createObjectURL(file);
+                            setAudioUrl(url);
+                            
+                            // Get audio duration
+                            const audio = new Audio(url);
+                            audio.addEventListener('loadedmetadata', () => {
+                              setAudioDuration(audio.duration);
+                              toast.success(`Audio loaded: ${file.name}`);
+                            });
+                          }
+                        }}
+                      />
+                    </label>
+                    {audioFile && audioDuration && (
+                      <p className="text-sm text-primary mt-2">
+                        Duration: {Math.floor(audioDuration / 60)}:{String(Math.floor(audioDuration % 60)).padStart(2, '0')}
+                      </p>
+                    )}
                   </div>
 
                   {/* Base Visual Style */}
