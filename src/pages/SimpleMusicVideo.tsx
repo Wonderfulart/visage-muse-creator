@@ -1,12 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Music, Image, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft } from "lucide-react";
+import { Upload, Music, Image, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
+import { splitAudio, AudioSegment, formatTime } from "@/utils/audioSplitter";
 
 type Step = 1 | 2 | 3 | 4;
+
+interface GeneratedClip {
+  id: string;
+  segmentIndex: number;
+  outputUrl: string;
+  startTime: number;
+  endTime: number;
+}
 
 const SimpleMusicVideo = () => {
   const navigate = useNavigate();
@@ -15,20 +24,26 @@ const SimpleMusicVideo = () => {
   // Audio state
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
   
   // Image state
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [outputVideoUrl, setOutputVideoUrl] = useState<string | null>(null);
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [estimatedCost, setEstimatedCost] = useState<number>(0);
+  
+  // Generated clips
+  const [generatedClips, setGeneratedClips] = useState<GeneratedClip[]>([]);
+  const [clipOrder, setClipOrder] = useState<number[]>([]);
+  
+  // Database record
+  const [videoRecordId, setVideoRecordId] = useState<string | null>(null);
   
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -42,8 +57,8 @@ const SimpleMusicVideo = () => {
     };
   }, [imagePreview]);
 
-  // Handle audio upload
-  const handleAudioUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle audio upload with splitting
+  const handleAudioUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -54,19 +69,47 @@ const SimpleMusicVideo = () => {
       return;
     }
 
-    // Get audio duration
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(file);
-    audio.onloadedmetadata = () => {
-      setAudioDuration(audio.duration);
-      // Calculate estimated cost (~$0.40 per 8 seconds)
-      const segments = Math.ceil(audio.duration / 8);
-      setEstimatedCost(segments * 0.40);
-      URL.revokeObjectURL(audio.src);
-    };
-
     setAudioFile(file);
     toast.success(`${file.name} uploaded`);
+
+    // Get audio duration first
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(file);
+    
+    audio.onloadedmetadata = async () => {
+      const duration = audio.duration;
+      setAudioDuration(duration);
+      URL.revokeObjectURL(audio.src);
+
+      // Split audio if longer than 8 seconds
+      if (duration > 8) {
+        setStatusMessage("Splitting audio into segments...");
+        try {
+          const result = await splitAudio(file, 8, (splitProgress) => {
+            setStatusMessage(`Splitting audio... ${splitProgress.toFixed(0)}%`);
+          });
+          setAudioSegments(result.segments);
+          setEstimatedCost(result.segments.length * 0.40);
+          setStatusMessage("");
+          toast.success(`Audio split into ${result.segments.length} segments`);
+        } catch (error) {
+          console.error('Split error:', error);
+          toast.error("Failed to split audio");
+        }
+      } else {
+        // Single segment for short audio
+        setAudioSegments([{
+          id: 'segment-1',
+          index: 0,
+          startTime: 0,
+          endTime: duration,
+          duration: duration,
+          audioBlob: file,
+          waveformData: []
+        }]);
+        setEstimatedCost(0.40);
+      }
+    };
   }, []);
 
   // Handle image upload
@@ -74,13 +117,11 @@ const SimpleMusicVideo = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       toast.error("Please upload an image file");
       return;
     }
 
-    // Create preview
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     const preview = URL.createObjectURL(file);
     setImagePreview(preview);
@@ -89,7 +130,7 @@ const SimpleMusicVideo = () => {
   }, [imagePreview]);
 
   // Upload file to Supabase storage
-  const uploadToStorage = async (file: File, bucket: string, path: string): Promise<string> => {
+  const uploadToStorage = async (file: File | Blob, bucket: string, path: string): Promise<string> => {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) throw new Error("Not authenticated");
 
@@ -108,9 +149,9 @@ const SimpleMusicVideo = () => {
     return urlData.publicUrl;
   };
 
-  // Start generation
+  // Start generation for all segments
   const handleGenerate = async () => {
-    if (!audioFile || !imageFile) {
+    if (!audioFile || !imageFile || audioSegments.length === 0) {
       toast.error("Please upload both audio and image");
       return;
     }
@@ -118,94 +159,195 @@ const SimpleMusicVideo = () => {
     setIsGenerating(true);
     setStep(3);
     setProgress(5);
-    setStatusMessage("Uploading your files...");
+    setGeneratedClips([]);
+    setCurrentSegmentIndex(0);
 
     try {
-      // Upload audio
-      setProgress(10);
-      setStatusMessage("Uploading music file...");
-      const uploadedAudioUrl = await uploadToStorage(
-        audioFile, 
-        'background-music', 
-        `lipsync-${Date.now()}.${audioFile.name.split('.').pop()}`
-      );
-      setAudioUrl(uploadedAudioUrl);
-      
-      // Upload image
-      setProgress(20);
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error("Not authenticated");
+
+      // Upload character image first
       setStatusMessage("Uploading photo...");
-      const uploadedImageUrl = await uploadToStorage(
-        imageFile, 
-        'videos', 
+      setProgress(10);
+      const imageUrl = await uploadToStorage(
+        imageFile,
+        'videos',
         `lipsync-character-${Date.now()}.${imageFile.name.split('.').pop()}`
       );
-      setImageUrl(uploadedImageUrl);
+      setUploadedImageUrl(imageUrl);
 
-      // Start lip-sync generation
-      setProgress(30);
-      setStatusMessage("Starting video generation...");
+      // Create database record for this video
+      const { data: videoRecord, error: videoError } = await supabase
+        .from('lipsync_videos')
+        .insert({
+          user_id: userData.user.id,
+          title: audioFile.name.replace(/\.[^/.]+$/, ''),
+          character_image_url: imageUrl,
+          status: 'processing',
+          total_segments: audioSegments.length,
+          completed_segments: 0,
+          total_cost: estimatedCost
+        })
+        .select()
+        .single();
+
+      if (videoError) throw videoError;
+      setVideoRecordId(videoRecord.id);
+
+      // Process each segment sequentially
+      const completedClips: GeneratedClip[] = [];
       
-      const { data, error } = await supabase.functions.invoke('generate-lipsync-syncso', {
-        body: {
-          characterImageUrl: uploadedImageUrl,
-          audioUrl: uploadedAudioUrl,
-          model: 'lipsync-2'
-        }
-      });
+      for (let i = 0; i < audioSegments.length; i++) {
+        const segment = audioSegments[i];
+        setCurrentSegmentIndex(i);
+        setStatusMessage(`Processing clip ${i + 1} of ${audioSegments.length}...`);
+        
+        const baseProgress = 15 + (i / audioSegments.length) * 70;
+        setProgress(baseProgress);
 
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error || 'Failed to start generation');
+        // Upload segment audio
+        const segmentAudioUrl = await uploadToStorage(
+          segment.audioBlob,
+          'background-music',
+          `lipsync-segment-${Date.now()}-${i}.wav`
+        );
 
-      setJobId(data.jobId);
-      setStatusMessage("Making person sing your song...");
-      setProgress(40);
+        // Create segment record in database
+        const { data: segmentRecord, error: segmentError } = await supabase
+          .from('lipsync_segments')
+          .insert({
+            video_id: videoRecord.id,
+            segment_index: i,
+            audio_url: segmentAudioUrl,
+            status: 'processing',
+            start_time: segment.startTime,
+            end_time: segment.endTime
+          })
+          .select()
+          .single();
 
-      // Start polling
-      pollingRef.current = setInterval(() => {
-        pollStatus(data.jobId);
-      }, 5000);
+        if (segmentError) throw segmentError;
+
+        // Start lip-sync generation for this segment
+        const { data: genData, error: genError } = await supabase.functions.invoke('generate-lipsync-syncso', {
+          body: {
+            characterImageUrl: imageUrl,
+            audioUrl: segmentAudioUrl,
+            model: 'lipsync-2'
+          }
+        });
+
+        if (genError) throw genError;
+        if (!genData.success) throw new Error(genData.error || 'Failed to start generation');
+
+        // Update segment with job ID
+        await supabase
+          .from('lipsync_segments')
+          .update({ job_id: genData.jobId })
+          .eq('id', segmentRecord.id);
+
+        // Poll for this segment's completion
+        const outputUrl = await pollSegmentStatus(genData.jobId, i, audioSegments.length);
+        
+        // Update segment record with output
+        await supabase
+          .from('lipsync_segments')
+          .update({ 
+            output_url: outputUrl, 
+            status: 'completed' 
+          })
+          .eq('id', segmentRecord.id);
+
+        // Update video record progress
+        await supabase
+          .from('lipsync_videos')
+          .update({ completed_segments: i + 1 })
+          .eq('id', videoRecord.id);
+
+        completedClips.push({
+          id: segmentRecord.id,
+          segmentIndex: i,
+          outputUrl: outputUrl,
+          startTime: segment.startTime,
+          endTime: segment.endTime
+        });
+
+        setGeneratedClips([...completedClips]);
+      }
+
+      // All segments complete
+      await supabase
+        .from('lipsync_videos')
+        .update({ status: 'completed' })
+        .eq('id', videoRecord.id);
+
+      setClipOrder(completedClips.map((_, i) => i));
+      setProgress(100);
+      setStatusMessage("All clips ready!");
+      setStep(4);
+      setIsGenerating(false);
+      toast.success("All video clips generated!");
 
     } catch (error) {
       console.error('Generation error:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to generate video');
+      
+      // Update video status to failed
+      if (videoRecordId) {
+        await supabase
+          .from('lipsync_videos')
+          .update({ status: 'failed' })
+          .eq('id', videoRecordId);
+      }
+      
       setIsGenerating(false);
       setStep(2);
     }
   };
 
-  // Poll for status
-  const pollStatus = async (id: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-lipsync-syncso?action=status', {
-        body: { jobId: id }
-      });
+  // Poll for single segment completion
+  const pollSegmentStatus = (jobId: string, segmentIndex: number, totalSegments: number): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const interval = setInterval(async () => {
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-lipsync-syncso?action=status', {
+            body: { jobId }
+          });
 
-      if (error) throw error;
+          if (error) {
+            clearInterval(interval);
+            reject(error);
+            return;
+          }
 
-      if (data.status === 'completed' && data.outputUrl) {
-        if (pollingRef.current) clearInterval(pollingRef.current);
-        setProgress(100);
-        setOutputVideoUrl(data.outputUrl);
-        setStatusMessage("Your video is ready!");
-        setStep(4);
-        setIsGenerating(false);
-        toast.success("Video generated successfully!");
-      } else if (data.status === 'failed') {
-        if (pollingRef.current) clearInterval(pollingRef.current);
-        throw new Error(data.error || 'Video generation failed');
-      } else {
-        // Still processing - increment progress
-        setProgress(prev => Math.min(prev + 5, 90));
-        const elapsed = Math.floor((Date.now() % 60000) / 1000);
-        setStatusMessage(`Making person sing... (${elapsed}s)`);
-      }
-    } catch (error) {
-      console.error('Polling error:', error);
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      toast.error(error instanceof Error ? error.message : 'Failed to check status');
-      setIsGenerating(false);
-      setStep(2);
-    }
+          if (data.status === 'completed' && data.outputUrl) {
+            clearInterval(interval);
+            resolve(data.outputUrl);
+          } else if (data.status === 'failed') {
+            clearInterval(interval);
+            reject(new Error(data.error || 'Segment generation failed'));
+          } else {
+            // Update progress within segment
+            const segmentProgress = 15 + ((segmentIndex + 0.5) / totalSegments) * 70;
+            setProgress(segmentProgress);
+            setStatusMessage(`Making clip ${segmentIndex + 1} of ${totalSegments} sing...`);
+          }
+        } catch (err) {
+          clearInterval(interval);
+          reject(err);
+        }
+      }, 5000);
+    });
+  };
+
+  // Reorder clips
+  const moveClip = (fromIndex: number, direction: 'left' | 'right') => {
+    const toIndex = direction === 'left' ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= clipOrder.length) return;
+
+    const newOrder = [...clipOrder];
+    [newOrder[fromIndex], newOrder[toIndex]] = [newOrder[toIndex], newOrder[fromIndex]];
+    setClipOrder(newOrder);
   };
 
   // Reset to start over
@@ -213,28 +355,26 @@ const SimpleMusicVideo = () => {
     setStep(1);
     setAudioFile(null);
     setAudioDuration(null);
-    setAudioUrl(null);
+    setAudioSegments([]);
     setImageFile(null);
     setImagePreview(null);
-    setImageUrl(null);
+    setUploadedImageUrl(null);
     setIsGenerating(false);
     setProgress(0);
     setStatusMessage("");
-    setJobId(null);
-    setOutputVideoUrl(null);
+    setGeneratedClips([]);
+    setClipOrder([]);
+    setVideoRecordId(null);
     setEstimatedCost(0);
+    setCurrentSegmentIndex(0);
   };
 
-  // Format duration
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Get ordered clips
+  const orderedClips = clipOrder.map(i => generatedClips[i]).filter(Boolean);
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Simple Header */}
+      {/* Header */}
       <header className="border-b border-gray-200 bg-white sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/app" className="flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors">
@@ -242,16 +382,19 @@ const SimpleMusicVideo = () => {
             <span className="font-medium">Back to Studio</span>
           </Link>
           <h1 className="font-heading font-bold text-xl text-gray-900">Simple Music Video</h1>
-          <div className="w-32" /> {/* Spacer for centering */}
+          <Link to="/simple/history" className="flex items-center gap-2 text-purple-600 hover:text-purple-700 transition-colors">
+            <Clock className="w-5 h-5" />
+            <span className="font-medium">My Videos</span>
+          </Link>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-12">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           
           {/* Step 1: Upload Music */}
           {step === 1 && (
-            <div className="text-center space-y-8 animate-fade-in">
+            <div className="text-center space-y-8 animate-fade-in max-w-2xl mx-auto">
               <div>
                 <h2 className="font-heading text-3xl font-bold text-gray-900 mb-2">
                   Step 1: Upload Your Music
@@ -287,7 +430,12 @@ const SimpleMusicVideo = () => {
                     <div>
                       <p className="text-xl font-semibold text-gray-900">{audioFile.name}</p>
                       {audioDuration && (
-                        <p className="text-gray-600">Duration: {formatDuration(audioDuration)}</p>
+                        <p className="text-gray-600">Duration: {formatTime(audioDuration)}</p>
+                      )}
+                      {audioSegments.length > 1 && (
+                        <p className="text-purple-600 font-medium mt-1">
+                          Will be split into {audioSegments.length} clips
+                        </p>
                       )}
                     </div>
                   </div>
@@ -304,9 +452,16 @@ const SimpleMusicVideo = () => {
                 )}
               </div>
 
+              {statusMessage && (
+                <div className="flex items-center justify-center gap-2 text-purple-600">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>{statusMessage}</span>
+                </div>
+              )}
+
               <Button
                 onClick={() => setStep(2)}
-                disabled={!audioFile}
+                disabled={!audioFile || audioSegments.length === 0}
                 className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
               >
                 Next: Choose Your Character
@@ -317,7 +472,7 @@ const SimpleMusicVideo = () => {
 
           {/* Step 2: Upload Photo */}
           {step === 2 && (
-            <div className="text-center space-y-8 animate-fade-in">
+            <div className="text-center space-y-8 animate-fade-in max-w-2xl mx-auto">
               <div>
                 <h2 className="font-heading text-3xl font-bold text-gray-900 mb-2">
                   Step 2: Upload a Photo
@@ -368,13 +523,16 @@ const SimpleMusicVideo = () => {
               </div>
 
               {/* Cost estimate */}
-              {estimatedCost > 0 && (
-                <div className="bg-gray-100 rounded-xl p-4">
-                  <p className="text-gray-600">
-                    Estimated cost: <span className="font-bold text-gray-900">${estimatedCost.toFixed(2)}</span>
+              <div className="bg-gray-100 rounded-xl p-4 space-y-1">
+                <p className="text-gray-600">
+                  Estimated cost: <span className="font-bold text-gray-900">${estimatedCost.toFixed(2)}</span>
+                </p>
+                {audioSegments.length > 1 && (
+                  <p className="text-sm text-gray-500">
+                    ({audioSegments.length} clips × $0.40 each)
                   </p>
-                </div>
-              )}
+                )}
+              </div>
 
               <div className="flex gap-4 justify-center">
                 <Button
@@ -399,13 +557,16 @@ const SimpleMusicVideo = () => {
 
           {/* Step 3: Generating */}
           {step === 3 && (
-            <div className="text-center space-y-8 animate-fade-in">
+            <div className="text-center space-y-8 animate-fade-in max-w-2xl mx-auto">
               <div>
                 <h2 className="font-heading text-3xl font-bold text-gray-900 mb-2">
                   Creating Your Music Video...
                 </h2>
                 <p className="text-lg text-gray-600">
-                  This usually takes 1-3 minutes
+                  {audioSegments.length > 1 
+                    ? `Processing ${audioSegments.length} clips (about ${audioSegments.length * 2} minutes)` 
+                    : 'This usually takes 1-3 minutes'
+                  }
                 </p>
               </div>
 
@@ -418,69 +579,160 @@ const SimpleMusicVideo = () => {
                 
                 <p className="text-xl font-medium text-gray-700">{statusMessage}</p>
 
-                {/* Progress steps */}
-                <div className="space-y-3 max-w-sm mx-auto text-left">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-500" />
-                    <span className="text-gray-600">Music uploaded</span>
+                {/* Segment progress */}
+                {audioSegments.length > 1 && (
+                  <div className="flex justify-center gap-2 flex-wrap">
+                    {audioSegments.map((_, i) => (
+                      <div
+                        key={i}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                          i < generatedClips.length 
+                            ? 'bg-green-500 text-white' 
+                            : i === currentSegmentIndex && isGenerating
+                              ? 'bg-purple-500 text-white animate-pulse'
+                              : 'bg-gray-200 text-gray-500'
+                        }`}
+                      >
+                        {i < generatedClips.length ? '✓' : i + 1}
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-500" />
-                    <span className="text-gray-600">Photo uploaded</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {progress >= 90 ? (
-                      <CheckCircle className="w-5 h-5 text-green-500" />
-                    ) : (
-                      <Loader2 className="w-5 h-5 text-purple-500 animate-spin" />
-                    )}
-                    <span className="text-gray-600">Making person sing</span>
-                  </div>
-                </div>
+                )}
               </div>
 
-              {estimatedCost > 0 && (
-                <p className="text-gray-500">
-                  Estimated cost: ${estimatedCost.toFixed(2)}
-                </p>
-              )}
+              <p className="text-gray-500">
+                Estimated cost: ${estimatedCost.toFixed(2)}
+              </p>
             </div>
           )}
 
-          {/* Step 4: Complete */}
-          {step === 4 && outputVideoUrl && (
+          {/* Step 4: Complete with Reordering */}
+          {step === 4 && generatedClips.length > 0 && (
             <div className="text-center space-y-8 animate-fade-in">
               <div>
                 <h2 className="font-heading text-3xl font-bold text-gray-900 mb-2">
-                  🎉 Your Video is Ready!
+                  🎉 Your Video Clips Are Ready!
                 </h2>
                 <p className="text-lg text-gray-600">
-                  Download and share your music video
+                  {generatedClips.length > 1 
+                    ? 'Drag or use arrows to reorder clips before downloading'
+                    : 'Download and share your music video'
+                  }
                 </p>
               </div>
 
-              <div className="rounded-2xl overflow-hidden shadow-xl border border-gray-200">
-                <video
-                  src={outputVideoUrl}
-                  controls
-                  autoPlay
-                  className="w-full aspect-video bg-black"
-                />
-              </div>
+              {/* Clip Reordering UI */}
+              {generatedClips.length > 1 ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500 flex items-center justify-center gap-2">
+                    <RotateCcw className="w-4 h-4" />
+                    Use arrows to reorder clips
+                  </p>
+                  
+                  <div className="flex gap-4 overflow-x-auto pb-4 px-4 justify-center">
+                    {clipOrder.map((clipIndex, orderIndex) => {
+                      const clip = generatedClips[clipIndex];
+                      if (!clip) return null;
+                      
+                      return (
+                        <div 
+                          key={clip.id}
+                          className="flex-shrink-0 bg-white rounded-xl border-2 border-gray-200 overflow-hidden shadow-sm hover:border-purple-300 transition-all w-48"
+                        >
+                          <video
+                            src={clip.outputUrl}
+                            className="w-full aspect-video bg-black"
+                            controls
+                            muted
+                          />
+                          <div className="p-3 space-y-2">
+                            <div className="text-center">
+                              <p className="font-semibold text-gray-900">Clip {orderIndex + 1}</p>
+                              <p className="text-xs text-gray-500">
+                                {formatTime(clip.startTime)} - {formatTime(clip.endTime)}
+                              </p>
+                            </div>
+                            
+                            {/* Reorder controls */}
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => moveClip(orderIndex, 'left')}
+                                disabled={orderIndex === 0}
+                                className="h-8 w-8 p-0"
+                              >
+                                <MoveLeft className="w-4 h-4" />
+                              </Button>
+                              
+                              <div className="text-purple-500">
+                                <RotateCcw className="w-5 h-5" />
+                              </div>
+                              
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => moveClip(orderIndex, 'right')}
+                                disabled={orderIndex === clipOrder.length - 1}
+                                className="h-8 w-8 p-0"
+                              >
+                                <MoveRight className="w-4 h-4" />
+                              </Button>
+                            </div>
 
-              <div className="flex gap-4 justify-center">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = clip.outputUrl;
+                                link.download = `clip-${orderIndex + 1}.mp4`;
+                                link.target = '_blank';
+                                link.click();
+                              }}
+                            >
+                              <Download className="w-4 h-4 mr-1" />
+                              Download
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                // Single clip view
+                <div className="rounded-2xl overflow-hidden shadow-xl border border-gray-200 max-w-2xl mx-auto">
+                  <video
+                    src={generatedClips[0]?.outputUrl}
+                    controls
+                    autoPlay
+                    className="w-full aspect-video bg-black"
+                  />
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-4 justify-center flex-wrap">
                 <Button
                   onClick={() => {
-                    const link = document.createElement('a');
-                    link.href = outputVideoUrl;
-                    link.download = `lipsync-video-${Date.now()}.mp4`;
-                    link.click();
+                    orderedClips.forEach((clip, i) => {
+                      setTimeout(() => {
+                        const link = document.createElement('a');
+                        link.href = clip.outputUrl;
+                        link.download = `clip-${i + 1}.mp4`;
+                        link.target = '_blank';
+                        link.click();
+                      }, i * 500);
+                    });
                   }}
                   className="h-14 px-8 text-lg font-semibold bg-purple-600 hover:bg-purple-700"
                 >
                   <Download className="w-5 h-5 mr-2" />
-                  Download My Video
+                  {generatedClips.length > 1 ? 'Download All Clips' : 'Download Video'}
                 </Button>
+                
                 <Button
                   onClick={handleReset}
                   variant="outline"
@@ -491,11 +743,10 @@ const SimpleMusicVideo = () => {
                 </Button>
               </div>
 
-              {estimatedCost > 0 && (
-                <p className="text-gray-500">
-                  Cost: ${estimatedCost.toFixed(2)}
-                </p>
-              )}
+              {/* Cost summary */}
+              <p className="text-gray-500">
+                Total cost: ${estimatedCost.toFixed(2)} for {generatedClips.length} clip{generatedClips.length !== 1 ? 's' : ''}
+              </p>
             </div>
           )}
         </div>

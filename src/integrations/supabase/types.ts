@@ -14,6 +14,95 @@ export type Database = {
   }
   public: {
     Tables: {
+      lipsync_segments: {
+        Row: {
+          audio_url: string | null
+          created_at: string | null
+          end_time: number | null
+          id: string
+          job_id: string | null
+          output_url: string | null
+          segment_index: number
+          start_time: number | null
+          status: string | null
+          video_id: string
+        }
+        Insert: {
+          audio_url?: string | null
+          created_at?: string | null
+          end_time?: number | null
+          id?: string
+          job_id?: string | null
+          output_url?: string | null
+          segment_index: number
+          start_time?: number | null
+          status?: string | null
+          video_id: string
+        }
+        Update: {
+          audio_url?: string | null
+          created_at?: string | null
+          end_time?: number | null
+          id?: string
+          job_id?: string | null
+          output_url?: string | null
+          segment_index?: number
+          start_time?: number | null
+          status?: string | null
+          video_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lipsync_segments_video_id_fkey"
+            columns: ["video_id"]
+            isOneToOne: false
+            referencedRelation: "lipsync_videos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lipsync_videos: {
+        Row: {
+          audio_url: string | null
+          character_image_url: string | null
+          completed_segments: number | null
+          created_at: string | null
+          final_video_url: string | null
+          id: string
+          status: string | null
+          title: string | null
+          total_cost: number | null
+          total_segments: number | null
+          user_id: string
+        }
+        Insert: {
+          audio_url?: string | null
+          character_image_url?: string | null
+          completed_segments?: number | null
+          created_at?: string | null
+          final_video_url?: string | null
+          id?: string
+          status?: string | null
+          title?: string | null
+          total_cost?: number | null
+          total_segments?: number | null
+          user_id: string
+        }
+        Update: {
+          audio_url?: string | null
+          character_image_url?: string | null
+          completed_segments?: number | null
+          created_at?: string | null
+          final_video_url?: string | null
+          id?: string
+          status?: string | null
+          title?: string | null
+          total_cost?: number | null
+          total_segments?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

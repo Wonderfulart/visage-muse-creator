@@ -1,4 +1,5 @@
 import { Toaster } from "@/components/ui/toaster";
+import SimpleMusicVideoHistory from "./pages/SimpleMusicVideoHistory";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -32,6 +33,7 @@ const App = () => (
               <Route path="/" element={<LandingPage />} />
               <Route path="/app" element={<ProtectedRoute><Index /></ProtectedRoute>} />
               <Route path="/simple" element={<ProtectedRoute><SimpleMusicVideo /></ProtectedRoute>} />
+              <Route path="/simple/history" element={<ProtectedRoute><SimpleMusicVideoHistory /></ProtectedRoute>} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
