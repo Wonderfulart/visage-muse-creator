@@ -70,7 +70,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/app`
+        redirectTo: 'https://visage-muse-creator.lovable.app/app'
       }
     });
     return { error };
