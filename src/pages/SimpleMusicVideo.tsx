@@ -113,14 +113,19 @@ const SimpleMusicVideo = () => {
       }]);
       setEstimatedCost(0.40);
     } else if (mediaType === 'image' && audioDuration > 8) {
-      // Image mode with long audio: re-split
+      // Image mode with long audio: re-split with 10 segment max
       setStatusMessage("Splitting audio into segments...");
       splitAudio(audioFile, 8, (splitProgress) => {
         setStatusMessage(`Splitting audio... ${splitProgress.toFixed(0)}%`);
       }).then(result => {
-        setAudioSegments(result.segments);
-        setEstimatedCost(result.segments.length * 0.40);
+        const MAX_SEGMENTS = 10;
+        const limitedSegments = result.segments.slice(0, MAX_SEGMENTS);
+        setAudioSegments(limitedSegments);
+        setEstimatedCost(limitedSegments.length * 0.40);
         setStatusMessage("");
+        if (result.segments.length > MAX_SEGMENTS) {
+          toast.info(`Using first 80 seconds of your song (${MAX_SEGMENTS} clips max)`);
+        }
       }).catch(error => {
         console.error('Split error:', error);
         toast.error("Failed to split audio");
@@ -167,17 +172,22 @@ const SimpleMusicVideo = () => {
         return;
       }
 
-      // Split audio if longer than 8 seconds (for image mode)
+      // Split audio if longer than 8 seconds (for image mode) - max 10 segments
       if (duration > 8) {
         setStatusMessage("Splitting audio into segments...");
         try {
           const result = await splitAudio(file, 8, (splitProgress) => {
             setStatusMessage(`Splitting audio... ${splitProgress.toFixed(0)}%`);
           });
-          setAudioSegments(result.segments);
-          setEstimatedCost(result.segments.length * 0.40);
+          const MAX_SEGMENTS = 10;
+          const limitedSegments = result.segments.slice(0, MAX_SEGMENTS);
+          setAudioSegments(limitedSegments);
+          setEstimatedCost(limitedSegments.length * 0.40);
           setStatusMessage("");
-          toast.success(`Audio split into ${result.segments.length} segments`);
+          if (result.segments.length > MAX_SEGMENTS) {
+            toast.info(`Using first 80 seconds of your song (${MAX_SEGMENTS} clips max)`);
+          }
+          toast.success(`Audio split into ${limitedSegments.length} segments`);
         } catch (error) {
           console.error('Split error:', error);
           toast.error("Failed to split audio");
@@ -273,8 +283,8 @@ const SimpleMusicVideo = () => {
     setGeneratedClips([]);
     setCurrentSegmentIndex(0);
 
-    // Determine which model to use based on media type
-    const selectedModel = mediaType === 'video' ? 'lipsync-2' : 'lipsync-1.9.0-beta';
+    // Determine which pipeline to use based on media type
+    const useImagePipeline = mediaType === 'image';
 
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -342,26 +352,58 @@ const SimpleMusicVideo = () => {
 
         if (segmentError) throw segmentError;
 
-        // Start lip-sync generation for this segment
-        const { data: genData, error: genError } = await supabase.functions.invoke('generate-lipsync-syncso', {
-          body: {
-            characterImageUrl: mediaUrl,
-            audioUrl: segmentAudioUrl,
-            model: selectedModel
-          }
-        });
+        let outputUrl: string;
 
-        if (genError) throw genError;
-        if (!genData.success) throw new Error(genData.error || 'Failed to start generation');
+        if (useImagePipeline) {
+          // IMAGE PIPELINE: Use Veo 3.1 → Sync.so
+          setStatusMessage(`Generating video from photo (clip ${i + 1}/${audioSegments.length})...`);
+          
+          const { data: genData, error: genError } = await supabase.functions.invoke('generate-image-lipsync', {
+            body: {
+              action: 'generate',
+              imageUrl: mediaUrl,
+              audioUrl: segmentAudioUrl
+            }
+          });
 
-        // Update segment with job ID
-        await supabase
-          .from('lipsync_segments')
-          .update({ job_id: genData.jobId })
-          .eq('id', segmentRecord.id);
+          if (genError) throw genError;
+          if (!genData.success) throw new Error(genData.error || 'Failed to start generation');
 
-        // Poll for this segment's completion
-        const outputUrl = await pollSegmentStatus(genData.jobId, i, audioSegments.length);
+          // Update segment with operation ID
+          await supabase
+            .from('lipsync_segments')
+            .update({ job_id: genData.veoOperationId })
+            .eq('id', segmentRecord.id);
+
+          // Poll for this segment's completion (two-stage: veo → syncso)
+          outputUrl = await pollImagePipelineStatus(
+            genData.veoOperationId, 
+            segmentAudioUrl,
+            i, 
+            audioSegments.length
+          );
+        } else {
+          // VIDEO PIPELINE: Use Sync.so directly with lipsync-2
+          const { data: genData, error: genError } = await supabase.functions.invoke('generate-lipsync-syncso', {
+            body: {
+              characterImageUrl: mediaUrl,
+              audioUrl: segmentAudioUrl,
+              model: 'lipsync-2'
+            }
+          });
+
+          if (genError) throw genError;
+          if (!genData.success) throw new Error(genData.error || 'Failed to start generation');
+
+          // Update segment with job ID
+          await supabase
+            .from('lipsync_segments')
+            .update({ job_id: genData.jobId })
+            .eq('id', segmentRecord.id);
+
+          // Poll for this segment's completion
+          outputUrl = await pollSegmentStatus(genData.jobId, i, audioSegments.length);
+        }
         
         // Update segment record with output
         await supabase
@@ -454,7 +496,73 @@ const SimpleMusicVideo = () => {
     });
   };
 
-  // Reorder clips
+  // Poll for image pipeline completion (Veo 3.1 → Sync.so two-stage)
+  const pollImagePipelineStatus = (
+    veoOperationId: string, 
+    audioUrl: string,
+    segmentIndex: number, 
+    totalSegments: number
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      let currentStage: 'veo' | 'syncso' = 'veo';
+      let syncsoJobId: string | null = null;
+      
+      const interval = setInterval(async () => {
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-image-lipsync', {
+            body: {
+              action: 'status',
+              stage: currentStage,
+              veoOperationId: currentStage === 'veo' ? veoOperationId : undefined,
+              syncsoJobId: currentStage === 'syncso' ? syncsoJobId : undefined,
+              audioUrl
+            }
+          });
+
+          if (error) {
+            clearInterval(interval);
+            reject(error);
+            return;
+          }
+
+          if (!data.success && data.error) {
+            clearInterval(interval);
+            reject(new Error(data.error));
+            return;
+          }
+
+          if (data.status === 'completed' && data.outputUrl) {
+            clearInterval(interval);
+            resolve(data.outputUrl);
+          } else if (data.status === 'failed') {
+            clearInterval(interval);
+            reject(new Error(data.error || 'Generation failed'));
+          } else if (data.status === 'processing') {
+            // Check if we need to transition to next stage
+            if (data.stage === 'syncso' && currentStage === 'veo') {
+              // Veo completed, now polling Sync.so
+              currentStage = 'syncso';
+              syncsoJobId = data.syncsoJobId;
+              setStatusMessage(`Adding lipsync to clip ${segmentIndex + 1}/${totalSegments}...`);
+            } else if (currentStage === 'veo') {
+              setStatusMessage(`Creating video from photo (clip ${segmentIndex + 1}/${totalSegments})...`);
+            } else {
+              setStatusMessage(`Adding lipsync (clip ${segmentIndex + 1}/${totalSegments})...`);
+            }
+            
+            // Update progress
+            const stageProgress = currentStage === 'veo' ? 0.3 : 0.7;
+            const segmentProgress = 15 + ((segmentIndex + stageProgress) / totalSegments) * 70;
+            setProgress(segmentProgress);
+          }
+        } catch (err) {
+          clearInterval(interval);
+          reject(err);
+        }
+      }, 8000); // Longer interval since this is a slower pipeline
+    });
+  };
+
   const moveClip = (fromIndex: number, direction: 'left' | 'right') => {
     const toIndex = direction === 'left' ? fromIndex - 1 : fromIndex + 1;
     if (toIndex < 0 || toIndex >= clipOrder.length) return;
