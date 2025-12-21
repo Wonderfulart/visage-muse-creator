@@ -29,3 +29,6 @@ verify_jwt = true
 
 [functions.generate-lipsync-syncso]
 verify_jwt = true
+
+[functions.generate-image-lipsync]
+verify_jwt = true
