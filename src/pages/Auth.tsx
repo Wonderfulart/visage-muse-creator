@@ -44,10 +44,26 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [isProcessingOAuth, setIsProcessingOAuth] = useState(false);
   
-  const { user, signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
+  const { user, loading: authLoading, signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  // Check if this is an OAuth callback (hash contains access_token or error)
+  useEffect(() => {
+    const hash = window.location.hash;
+    const isOAuthCallback = hash.includes('access_token') || hash.includes('error');
+    
+    if (isOAuthCallback) {
+      setIsProcessingOAuth(true);
+      // Give Supabase time to process the callback
+      const timer = setTimeout(() => {
+        setIsProcessingOAuth(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   // Handle OAuth errors from URL
   useEffect(() => {
@@ -57,16 +73,30 @@ const Auth = () => {
     if (error) {
       const message = errorDescription || 'Authentication failed. Please try again.';
       toast.error(message);
+      setIsProcessingOAuth(false);
       // Clear the error params from URL
       window.history.replaceState({}, '', '/auth');
     }
   }, [searchParams]);
 
+  // Navigate to app once user is authenticated and not processing OAuth
   useEffect(() => {
-    if (user) {
+    if (user && !isProcessingOAuth) {
       navigate('/app');
     }
-  }, [user, navigate]);
+  }, [user, navigate, isProcessingOAuth]);
+
+  // Show loading state while auth is loading or processing OAuth callback
+  if (authLoading || isProcessingOAuth) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">Signing you in...</p>
+        </div>
+      </div>
+    );
+  }
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
