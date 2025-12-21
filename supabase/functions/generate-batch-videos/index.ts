@@ -1,4 +1,6 @@
-// Batch video generation edge function for multiple scenes
+// ENHANCED generate-batch-videos with diagnostic logging
+// Replace your existing supabase/functions/generate-batch-videos/index.ts with this
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -113,9 +115,24 @@ async function generateSingleVideo(
       enhancedPrompt = `${scene.prompt}. Maintain exact facial features and identity of the person in the reference image.`;
     }
 
+    // 🔍 DIAGNOSTIC LOGGING - Verify each scene has unique prompt
+    console.log(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 SCENE ${scene.order} GENERATION START
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Scene ID: ${scene.id}
+Order: ${scene.order}
+Duration: ${scene.duration}s
+Original Prompt: ${scene.prompt.substring(0, 120)}...
+Enhanced Prompt: ${enhancedPrompt.substring(0, 120)}...
+Has Reference Image: ${!!referenceImage}
+Preserve Face: ${preserveFace}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    `);
+
     const requestBody: Record<string, unknown> = {
       instances: [{
-        prompt: enhancedPrompt
+        prompt: enhancedPrompt  // ✅ This should be DIFFERENT for each scene
       }],
       parameters: {
         aspectRatio: aspectRatio,
@@ -139,7 +156,7 @@ async function generateSingleVideo(
       }
     }
 
-    console.log(`Generating scene ${scene.order}: ${scene.prompt.substring(0, 50)}...`);
+    console.log(`🚀 Calling VEO API for scene ${scene.order}...`);
 
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -153,16 +170,16 @@ async function generateSingleVideo(
     const responseText = await response.text();
 
     if (!response.ok) {
-      console.error(`Scene ${scene.order} failed:`, responseText);
+      console.error(`❌ Scene ${scene.order} FAILED:`, responseText);
       return { success: false, error: responseText, order: scene.order };
     }
 
     const data = JSON.parse(responseText);
-    console.log(`Scene ${scene.order} started, operation:`, data.name);
+    console.log(`✅ Scene ${scene.order} STARTED, operation: ${data.name}`);
 
     return { success: true, requestId: data.name, order: scene.order };
   } catch (error) {
-    console.error(`Scene ${scene.order} error:`, error);
+    console.error(`❌ Scene ${scene.order} ERROR:`, error);
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error', order: scene.order };
   }
 }
@@ -182,7 +199,7 @@ serve(async (req) => {
       );
     }
 
-    console.log('Batch generation for user:', userInfo.userId);
+    console.log('🔐 Batch generation for user:', userInfo.userId);
 
     const serviceAccountJson = Deno.env.get('VERTEX_SERVICE_ACCOUNT');
     
@@ -227,6 +244,37 @@ serve(async (req) => {
       );
     }
 
+    // 🔍 CRITICAL DIAGNOSTIC - Verify scenes are unique BEFORE generation
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║           BATCH VIDEO GENERATION - SCENE VERIFICATION        ║
+╚══════════════════════════════════════════════════════════════╝
+Total Scenes: ${scenes.length}
+    `);
+
+    const promptsAreDifferent = new Set(scenes.map(s => s.prompt)).size === scenes.length;
+    
+    scenes.forEach((scene, idx) => {
+      console.log(`
+Scene ${idx}:
+  - ID: ${scene.id}
+  - Order: ${scene.order}
+  - Duration: ${scene.duration}s
+  - Prompt (first 100 chars): ${scene.prompt.substring(0, 100)}...
+      `);
+    });
+
+    if (!promptsAreDifferent) {
+      console.error(`
+⚠️⚠️⚠️ WARNING: DUPLICATE PROMPTS DETECTED! ⚠️⚠️⚠️
+Unique prompts: ${new Set(scenes.map(s => s.prompt)).size}
+Total scenes: ${scenes.length}
+THIS IS WHY YOU'RE GETTING DUPLICATE VIDEOS!
+      `);
+    } else {
+      console.log(`✅ All ${scenes.length} scene prompts are UNIQUE!`);
+    }
+
     // Validate scenes
     for (const scene of scenes) {
       if (!scene.prompt || scene.prompt.trim().length === 0) {
@@ -257,15 +305,16 @@ serve(async (req) => {
 
     const tier = isAdmin ? 'admin' : (profile?.subscription_tier || 'free');
     const shouldAddWatermark = tier === 'free';
-    console.log(`Batch generation for tier ${tier}, watermark: ${shouldAddWatermark}, isAdmin: ${isAdmin}`);
+    console.log(`💎 Tier: ${tier}, Watermark: ${shouldAddWatermark}, Admin: ${isAdmin}`);
 
-    console.log(`Starting batch generation of ${scenes.length} scenes`);
+    console.log(`🎬 Starting batch generation of ${scenes.length} scenes`);
 
     // Get OAuth2 access token
     const accessToken = await getAccessToken(serviceAccount);
-    console.log('Access token obtained');
+    console.log('🔑 Access token obtained');
 
-    // Generate all scenes
+    // Generate all scenes IN PARALLEL
+    console.log('🚀 Starting parallel video generation...');
     const results = await Promise.all(
       scenes.map(scene => 
         generateSingleVideo(
@@ -281,7 +330,21 @@ serve(async (req) => {
     );
 
     const successCount = results.filter(r => r.success).length;
-    console.log(`Batch generation complete: ${successCount}/${scenes.length} scenes started`);
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║              BATCH GENERATION COMPLETE                       ║
+╚══════════════════════════════════════════════════════════════╝
+Success: ${successCount}/${scenes.length} scenes
+Failed: ${scenes.length - successCount}
+    `);
+
+    results.forEach(r => {
+      if (r.success) {
+        console.log(`  ✅ Scene ${r.order}: ${r.requestId}`);
+      } else {
+        console.log(`  ❌ Scene ${r.order}: ${r.error}`);
+      }
+    });
 
     return new Response(
       JSON.stringify({
@@ -289,7 +352,8 @@ serve(async (req) => {
         operations: results,
         totalScenes: scenes.length,
         successCount,
-        userId: userInfo.userId
+        userId: userInfo.userId,
+        promptsWereUnique: promptsAreDifferent  // ← Tell frontend if prompts were different
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
