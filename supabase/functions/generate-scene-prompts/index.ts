@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -116,12 +117,40 @@ function getNarrativeGuidance(position: string, sceneIndex: number, totalScenes:
   return guidance[position] || guidance['rising'];
 }
 
+// Authentication helper
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Verify authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
+      console.error('Unauthorized access attempt to generate-scene-prompts');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Scene prompt generation for user:', userInfo.userId);
     const { basePrompt, scenes, aspectRatio, preserveFace, lyrics, lyricSections, songAnalysis } = await req.json();
 
     const sanitizedBasePrompt = sanitizePrompt(basePrompt);

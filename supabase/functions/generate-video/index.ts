@@ -257,8 +257,8 @@ serve(async (req) => {
     if (!serviceAccountJson) {
       console.error('VERTEX_SERVICE_ACCOUNT is not configured');
       return new Response(
-        JSON.stringify({ error: 'Vertex AI service account not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Video generation service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -268,8 +268,8 @@ serve(async (req) => {
     } catch {
       console.error('Failed to parse service account JSON');
       return new Response(
-        JSON.stringify({ error: 'Invalid service account JSON format' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Video generation service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -366,25 +366,17 @@ serve(async (req) => {
     if (!response.ok) {
       console.error('Vertex AI error:', responseText);
       
-      let errorMessage = 'Video generation failed';
-      let hint = 'Check that your service account has access to Vertex AI and Veo is enabled in your project';
-      
+      // Log detailed error server-side but return generic message to client
       try {
         const errorData = JSON.parse(responseText);
-        errorMessage = errorData.error?.message || errorMessage;
-        
-        if (response.status === 403) {
-          hint = 'Permission denied. Ensure your service account has the Vertex AI User role and Veo is enabled.';
-        } else if (response.status === 404) {
-          hint = 'Model or endpoint not found. Veo may not be available in your project or region.';
-        }
+        console.error('Parsed error:', errorData.error?.message);
       } catch {
-        errorMessage = responseText || errorMessage;
+        console.error('Raw error:', responseText);
       }
       
       return new Response(
-        JSON.stringify({ error: errorMessage, details: responseText, hint }),
-        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Video generation failed. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

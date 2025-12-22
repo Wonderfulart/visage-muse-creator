@@ -88,16 +88,43 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
   return `data:${mimeType};base64,${base64}`;
 }
 
+// Authentication helper
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Verify authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
+      console.error('Unauthorized access attempt to generate-image-lipsync');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const body = await req.json();
     const action = body.action || 'generate';
     
-    console.log('generate-image-lipsync called with action:', action);
+    console.log('generate-image-lipsync called by user:', userInfo.userId, 'action:', action);
 
     // ===== ACTION: GENERATE =====
     // Stage 1: Start Veo 3.1 video generation from image
@@ -265,7 +292,7 @@ serve(async (req) => {
                 bytes[i] = binaryStr.charCodeAt(i);
               }
               
-              const fileName = `temp/veo-output-${Date.now()}-${crypto.randomUUID()}.mp4`;
+              const fileName = `${userInfo.userId}/veo-output-${Date.now()}-${crypto.randomUUID()}.mp4`;
               
               const { error: uploadError } = await supabase.storage
                 .from('videos')

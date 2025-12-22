@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,6 +16,23 @@ interface StatusRequest {
   jobId: string;
 }
 
+// Authentication helper
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -22,27 +40,40 @@ serve(async (req) => {
   }
 
   try {
+    // Verify authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
+      console.error('Unauthorized access attempt to generate-lipsync-syncso');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const SYNC_API_KEY = Deno.env.get('SYNC_API_KEY');
     if (!SYNC_API_KEY) {
       console.error('SYNC_API_KEY not configured');
-      throw new Error('SYNC_API_KEY is not configured');
+      return new Response(
+        JSON.stringify({ success: false, error: 'Service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'generate';
 
+    console.log('Lipsync request from user:', userInfo.userId, 'action:', action);
+
     if (action === 'generate') {
       // Generate lip-sync video
       const { characterImageUrl, audioUrl, model = 'lipsync-1.9.0-beta' }: GenerateRequest = await req.json();
 
-      console.log('Starting lip-sync generation:', { characterImageUrl, audioUrl, model });
+      console.log('Starting lip-sync generation:', { characterImageUrl: characterImageUrl?.substring(0, 50), audioUrl: audioUrl?.substring(0, 50), model });
 
       if (!characterImageUrl || !audioUrl) {
         throw new Error('characterImageUrl and audioUrl are required');
       }
 
-      // lipsync-1.9.0-beta supports image input for image-to-video
-      // lipsync-2 requires video input
       const inputType = model === 'lipsync-2' ? 'video' : 'image';
 
       const response = await fetch('https://api.sync.so/v2/generate', {
@@ -61,10 +92,11 @@ serve(async (req) => {
       });
 
       const responseText = await response.text();
-      console.log('Sync.so generate response:', response.status, responseText);
+      console.log('Sync.so generate response:', response.status);
 
       if (!response.ok) {
-        throw new Error(`Sync.so API error: ${response.status} - ${responseText}`);
+        console.error('Sync.so API error:', responseText);
+        throw new Error('Lip-sync generation failed');
       }
 
       const data = JSON.parse(responseText);
@@ -96,15 +128,15 @@ serve(async (req) => {
       });
 
       const responseText = await response.text();
-      console.log('Sync.so status response:', response.status, responseText);
+      console.log('Sync.so status response:', response.status);
 
       if (!response.ok) {
-        throw new Error(`Sync.so API error: ${response.status} - ${responseText}`);
+        console.error('Sync.so status check error:', responseText);
+        throw new Error('Status check failed');
       }
 
       const data = JSON.parse(responseText);
 
-      // Map Sync.so status to our status format
       let mappedStatus = 'processing';
       if (data.status === 'COMPLETED') {
         mappedStatus = 'completed';
@@ -119,7 +151,7 @@ serve(async (req) => {
         status: mappedStatus,
         originalStatus: data.status,
         outputUrl: data.outputUrl || null,
-        error: data.error || null,
+        error: data.error ? 'Processing failed' : null,
         creditsDeducted: data.creditsDeducted || 0
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -133,7 +165,7 @@ serve(async (req) => {
     console.error('Error in generate-lipsync-syncso:', error);
     return new Response(JSON.stringify({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
+      error: 'Lip-sync operation failed. Please try again.'
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
