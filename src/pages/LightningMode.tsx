@@ -179,13 +179,47 @@ export default function LightningMode() {
     setIsGeneratingPrompts(true);
     setPhase('prompts');
 
+    const toastId = toast.loading("Analyzing audio...");
+
     try {
       // Calculate scene count (max 10, ~8-12 seconds per scene)
       const sceneDuration = 10;
       const sceneCount = Math.min(10, Math.max(3, Math.ceil(audioDuration / sceneDuration)));
       
-      // Analyze audio
-      const audioAnalysis = await analyzeAudio(audioFile, sceneCount);
+      console.log('[Lightning] Starting audio analysis for', sceneCount, 'scenes');
+      
+      // Default analysis fallback
+      const defaultAnalysis: { 
+        segments: { segmentIndex: number; energy: number; tempo: number; beatDensity: number; dynamics: 'quiet' | 'building' | 'peak' | 'fading' }[];
+        averageEnergy: number;
+        averageTempo: number;
+        energyProgression: 'building' | 'steady' | 'dynamic' | 'fading';
+      } = {
+        segments: Array.from({ length: sceneCount }, (_, i) => ({
+          segmentIndex: i,
+          energy: 0.6,
+          tempo: 120,
+          beatDensity: 2,
+          dynamics: 'building' as const
+        })),
+        averageEnergy: 0.6,
+        averageTempo: 120,
+        energyProgression: 'steady' as const
+      };
+
+      // Try audio analysis with timeout and fallback
+      let audioAnalysis = defaultAnalysis;
+      try {
+        console.log('[Lightning] Attempting audio analysis...');
+        audioAnalysis = await analyzeAudio(audioFile, sceneCount);
+        console.log('[Lightning] Audio analysis successful:', audioAnalysis);
+      } catch (audioError) {
+        console.warn('[Lightning] Audio analysis failed, using defaults:', audioError);
+        toast.info("Using default audio analysis for faster processing");
+      }
+      
+      toast.loading("Generating scene prompts...", { id: toastId });
+      console.log('[Lightning] Parsing lyrics...');
       
       // Parse lyrics
       const lyricSections = parseLyrics(lyrics || "Instrumental track - create visual narrative", sceneCount);
@@ -225,6 +259,8 @@ Song Theme: ${songAnalysis.overallTheme}
 Narrative Type: ${songAnalysis.narrativeType}
       `.trim();
 
+      console.log('[Lightning] Calling generate-scene-prompts edge function...');
+      
       // Call generate-scene-prompts
       const { data, error } = await supabase.functions.invoke('generate-scene-prompts', {
         body: {
@@ -236,7 +272,12 @@ Narrative Type: ${songAnalysis.narrativeType}
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Lightning] Edge function error:', error);
+        throw error;
+      }
+
+      console.log('[Lightning] Edge function response:', data);
 
       // Handle response - the edge function returns 'prompts' not 'scenes'
       const promptsData = data.prompts || data.scenes;
@@ -255,13 +296,14 @@ Narrative Type: ${songAnalysis.narrativeType}
 
         setClips(generatedClips);
         setPhase('editing');
-        toast.success(`Generated ${generatedClips.length} scene prompts!`);
+        toast.success(`Generated ${generatedClips.length} scene prompts!`, { id: toastId });
+        console.log('[Lightning] Successfully generated', generatedClips.length, 'clips');
       } else {
-        throw new Error("No prompts generated");
+        throw new Error("No prompts generated from API response");
       }
     } catch (error) {
-      console.error("Prompt generation error:", error);
-      toast.error("Failed to generate prompts");
+      console.error("[Lightning] Prompt generation error:", error);
+      toast.error("Failed to generate prompts. Please try again.", { id: toastId });
       setPhase('analyzing');
     } finally {
       setIsGeneratingPrompts(false);

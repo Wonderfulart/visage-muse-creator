@@ -41,17 +41,22 @@ export async function analyzeAudio(
   segmentCount: number,
   onProgress?: (progress: number) => void
 ): Promise<FullAudioAnalysis> {
-  return new Promise((resolve, reject) => {
+  // Create a timeout promise
+  const TIMEOUT_MS = 30000; // 30 second timeout
+  
+  const analysisPromise = new Promise<FullAudioAnalysis>((resolve, reject) => {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     const reader = new FileReader();
 
     reader.onload = async (e) => {
       try {
         onProgress?.(10);
+        console.log('[AudioAnalyzer] Starting audio decode...');
         
         const arrayBuffer = e.target?.result as ArrayBuffer;
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         
+        console.log('[AudioAnalyzer] Audio decoded, analyzing segments...');
         onProgress?.(30);
         
         const channelData = audioBuffer.getChannelData(0);
@@ -116,6 +121,7 @@ export async function analyzeAudio(
         }
         
         onProgress?.(100);
+        console.log('[AudioAnalyzer] Analysis complete');
         
         await audioContext.close();
         
@@ -127,14 +133,28 @@ export async function analyzeAudio(
         });
         
       } catch (error) {
+        console.error('[AudioAnalyzer] Error during analysis:', error);
         audioContext.close();
         reject(error);
       }
     };
 
-    reader.onerror = () => reject(new Error('Failed to read audio file'));
+    reader.onerror = () => {
+      console.error('[AudioAnalyzer] Failed to read audio file');
+      reject(new Error('Failed to read audio file'));
+    };
+    
     reader.readAsArrayBuffer(audioFile);
   });
+
+  // Race against timeout
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Audio analysis timed out after ${TIMEOUT_MS / 1000} seconds`));
+    }, TIMEOUT_MS);
+  });
+
+  return Promise.race([analysisPromise, timeoutPromise]);
 }
 
 /**
