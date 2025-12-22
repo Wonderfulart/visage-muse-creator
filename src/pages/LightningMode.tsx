@@ -228,8 +228,10 @@ Narrative Type: ${songAnalysis.narrativeType}
 
       if (error) throw error;
 
-      if (data.scenes) {
-        const generatedClips: LightningClip[] = data.scenes.map((scene: any, index: number) => ({
+      // Handle response - the edge function returns 'prompts' not 'scenes'
+      const promptsData = data.prompts || data.scenes;
+      if (promptsData && promptsData.length > 0) {
+        const generatedClips: LightningClip[] = promptsData.map((scene: any, index: number) => ({
           id: `clip-${index}`,
           index,
           startTime: scenes[index].startTime,
@@ -244,6 +246,8 @@ Narrative Type: ${songAnalysis.narrativeType}
         setClips(generatedClips);
         setPhase('editing');
         toast.success(`Generated ${generatedClips.length} scene prompts!`);
+      } else {
+        throw new Error("No prompts generated");
       }
     } catch (error) {
       console.error("Prompt generation error:", error);
