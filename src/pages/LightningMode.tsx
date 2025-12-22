@@ -738,7 +738,7 @@ Narrative Type: ${songAnalysis.narrativeType}
               <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
                 <input
                   type="file"
-                  accept="audio/*"
+                  accept=".mp3,.wav,.m4a,.ogg,.flac,.aac,.wma,.aiff,audio/*"
                   onChange={handleAudioUpload}
                   className="hidden"
                 />
