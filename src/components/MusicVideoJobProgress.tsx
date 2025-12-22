@@ -81,15 +81,6 @@ export function MusicVideoJobProgress({ jobId, onComplete, onCancel }: MusicVide
     if (!isPolling) return;
 
     try {
-      const { data, error } = await supabase.functions.invoke(
-        'music-video-orchestrator',
-        {
-          body: { jobId },
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
-
       const { data: statusData, error: statusError } = await supabase.functions.invoke(
         'music-video-orchestrator',
         {
