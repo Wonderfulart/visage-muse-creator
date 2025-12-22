@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight, FileText, Sparkles, ChevronDown, ChevronUp, Archive } from "lucide-react";
+import { Upload, Music, Image, Video, Loader2, CheckCircle, Download, RotateCcw, ArrowRight, ArrowLeft, Clock, MoveLeft, MoveRight, FileText, Sparkles, ChevronDown, ChevronUp, Archive, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
@@ -875,10 +875,19 @@ const SimpleMusicVideo = () => {
             <span className="font-medium">Back to Studio</span>
           </Link>
           <h1 className="font-heading font-bold text-xl text-gray-900">Simple Music Video</h1>
-          <Link to="/simple/history" className="flex items-center gap-2 text-purple-600 hover:text-purple-700 transition-colors">
-            <Clock className="w-5 h-5" />
-            <span className="font-medium">My Videos</span>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link 
+              to="/lightning" 
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-yellow-400/20 to-orange-500/20 border border-yellow-500/30 hover:border-yellow-500/50 transition-all"
+            >
+              <Zap className="w-4 h-4 text-yellow-600" />
+              <span className="text-sm font-medium text-yellow-700">Lightning Mode</span>
+            </Link>
+            <Link to="/simple/history" className="flex items-center gap-2 text-purple-600 hover:text-purple-700 transition-colors">
+              <Clock className="w-5 h-5" />
+              <span className="font-medium">My Videos</span>
+            </Link>
+          </div>
         </div>
       </header>
 
