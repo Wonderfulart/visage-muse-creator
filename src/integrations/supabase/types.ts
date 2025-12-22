@@ -108,7 +108,6 @@ export type Database = {
           created_at: string
           email: string | null
           id: string
-          stripe_customer_id: string | null
           subscription_end: string | null
           subscription_tier: string | null
           usage_reset_date: string | null
@@ -118,7 +117,6 @@ export type Database = {
           created_at?: string
           email?: string | null
           id: string
-          stripe_customer_id?: string | null
           subscription_end?: string | null
           subscription_tier?: string | null
           usage_reset_date?: string | null
@@ -128,7 +126,6 @@ export type Database = {
           created_at?: string
           email?: string | null
           id?: string
-          stripe_customer_id?: string | null
           subscription_end?: string | null
           subscription_tier?: string | null
           usage_reset_date?: string | null
@@ -177,6 +174,30 @@ export type Database = {
           text_overlays?: Json | null
           title?: string | null
           transition_type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      stripe_customers: {
+        Row: {
+          created_at: string | null
+          id: string
+          stripe_customer_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          stripe_customer_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          stripe_customer_id?: string
+          updated_at?: string | null
           user_id?: string
         }
         Relationships: []
