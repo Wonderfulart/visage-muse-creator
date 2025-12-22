@@ -223,9 +223,10 @@ serve(async (req) => {
     const serviceAccountJson = Deno.env.get('VERTEX_SERVICE_ACCOUNT');
     
     if (!serviceAccountJson) {
+      console.error('VERTEX_SERVICE_ACCOUNT is not configured');
       return new Response(
-        JSON.stringify({ error: 'Vertex AI service account not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ status: 'failed', error: 'Service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -233,9 +234,10 @@ serve(async (req) => {
     try {
       serviceAccount = JSON.parse(serviceAccountJson);
     } catch {
+      console.error('Failed to parse service account JSON');
       return new Response(
-        JSON.stringify({ error: 'Invalid service account JSON format' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ status: 'failed', error: 'Service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -291,11 +293,11 @@ serve(async (req) => {
     console.log('Response body preview:', responseText.substring(0, 500));
 
     if (!response.ok) {
-      console.error('Status check failed:', responseText);
+      console.error('Status check failed:', response.status, responseText);
       return new Response(
         JSON.stringify({ 
           status: 'failed',
-          error: `Failed to check status: ${response.status}` 
+          error: 'Status check failed. Please try again.' 
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );

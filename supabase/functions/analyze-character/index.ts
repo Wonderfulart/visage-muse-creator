@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,23 +16,54 @@ interface CharacterAnalysis {
   settingSuggestions: string[];
 }
 
+// Authentication helper
+async function getUserFromToken(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader) return null;
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return { userId: user.id };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Verify authentication
+    const userInfo = await getUserFromToken(req);
+    if (!userInfo) {
+      console.error('Unauthorized access attempt to analyze-character');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { imageUrl } = await req.json();
     
     if (!imageUrl) {
       throw new Error('Image URL is required');
     }
 
-    console.log('Analyzing character image:', imageUrl);
+    console.log('Analyzing character image for user:', userInfo.userId);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+      console.error('LOVABLE_API_KEY not configured');
+      return new Response(
+        JSON.stringify({ error: 'Service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const systemPrompt = `You are an expert cinematographer and visual storyteller. Analyze this reference image to extract key visual and mood information that will guide music video generation.
@@ -79,8 +111,7 @@ Be specific and creative. Your analysis will directly influence the quality of t
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("AI gateway error:", response.status);
       
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
@@ -95,7 +126,7 @@ Be specific and creative. Your analysis will directly influence the quality of t
         });
       }
       
-      throw new Error(`AI gateway error: ${response.status}`);
+      throw new Error('Character analysis failed');
     }
 
     const aiResponse = await response.json();
@@ -105,12 +136,11 @@ Be specific and creative. Your analysis will directly influence the quality of t
       throw new Error("No response from AI");
     }
 
-    console.log('Raw AI response:', content);
+    console.log('Raw AI response received');
 
     // Parse the JSON response
     let analysis: CharacterAnalysis;
     try {
-      // Try to extract JSON from the response (in case it's wrapped in markdown)
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         analysis = JSON.parse(jsonMatch[0]);
@@ -119,7 +149,6 @@ Be specific and creative. Your analysis will directly influence the quality of t
       }
     } catch (parseError) {
       console.error("Failed to parse AI response:", parseError);
-      // Return a default analysis if parsing fails
       analysis = {
         mood: ["cinematic", "expressive", "dynamic"],
         colorPalette: ["warm tones", "natural lighting", "subtle shadows"],
@@ -131,7 +160,7 @@ Be specific and creative. Your analysis will directly influence the quality of t
       };
     }
 
-    console.log('Character analysis complete:', analysis);
+    console.log('Character analysis complete for user:', userInfo.userId);
 
     return new Response(JSON.stringify({ 
       success: true, 
@@ -143,7 +172,7 @@ Be specific and creative. Your analysis will directly influence the quality of t
   } catch (error) {
     console.error("Error analyzing character:", error);
     return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : "Failed to analyze character" 
+      error: 'Character analysis failed. Please try again.' 
     }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

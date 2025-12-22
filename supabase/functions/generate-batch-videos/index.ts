@@ -206,8 +206,8 @@ serve(async (req) => {
     if (!serviceAccountJson) {
       console.error('VERTEX_SERVICE_ACCOUNT is not configured');
       return new Response(
-        JSON.stringify({ error: 'Vertex AI service account not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Video generation service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -217,8 +217,8 @@ serve(async (req) => {
     } catch {
       console.error('Failed to parse service account JSON');
       return new Response(
-        JSON.stringify({ error: 'Invalid service account JSON format' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Video generation service temporarily unavailable' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
