@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   Zap, Upload, Sparkles, Play, ArrowRight, ArrowLeft, 
-  Music, Image, Loader2, Check, AlertCircle, Download
+  Music, Image, Loader2, Check, AlertCircle, Download, Film, RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -16,6 +16,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { analyzeAudio, getNarrativePosition, getTempoDescription, getEnergyDescription } from "@/utils/audioAnalyzer";
 import { parseLyrics, analyzeSongNarrative } from "@/utils/lyricsParser";
 import { cn } from "@/lib/utils";
+import { downloadClipsAsZip } from "@/utils/zipDownloader";
+import { stitchVideos, revokeStitchedVideo, StitchProgress } from "@/utils/videoStitcher";
 
 type Phase = 'upload' | 'analyzing' | 'prompts' | 'editing' | 'syncing' | 'complete';
 
@@ -57,6 +59,13 @@ export default function LightningMode() {
   
   // Generation state
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  
+  // Download/Stitch state
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isStitching, setIsStitching] = useState(false);
+  const [stitchProgress, setStitchProgress] = useState<StitchProgress | null>(null);
+  const [stitchedVideoUrl, setStitchedVideoUrl] = useState<string | null>(null);
+  
   // Polling refs
   const pollingRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
@@ -65,6 +74,7 @@ export default function LightningMode() {
     return () => {
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       if (photoUrl && photoUrl.startsWith('blob:')) URL.revokeObjectURL(photoUrl);
+      if (stitchedVideoUrl) revokeStitchedVideo(stitchedVideoUrl);
       pollingRefs.current.forEach(interval => clearInterval(interval));
     };
   }, []);
@@ -581,6 +591,68 @@ Narrative Type: ${songAnalysis.narrativeType}
     toast.success("All clips processed!");
   };
 
+  // Download all clips as ZIP
+  const handleDownloadZip = async () => {
+    const clipsWithVideos = clips.filter(c => c.syncedVideoUrl || c.videoUrl);
+    if (clipsWithVideos.length === 0) {
+      toast.error("No videos to download");
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      const clipsForZip = clipsWithVideos.map(clip => ({
+        url: clip.syncedVideoUrl || clip.videoUrl || '',
+        filename: `clip-${clip.index + 1}.mp4`
+      }));
+      
+      await downloadClipsAsZip(clipsForZip, 'lightning-music-video-clips.zip');
+      toast.success("ZIP downloaded successfully!");
+    } catch (error) {
+      console.error("Download error:", error);
+      toast.error("Failed to download ZIP");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // Stitch all videos into final video
+  const handleStitchVideos = async () => {
+    const videoUrls = clips
+      .map(c => c.syncedVideoUrl || c.videoUrl)
+      .filter(Boolean) as string[];
+    
+    if (videoUrls.length === 0) {
+      toast.error("No videos to stitch");
+      return;
+    }
+
+    setIsStitching(true);
+    setStitchProgress(null);
+    
+    try {
+      const result = await stitchVideos(videoUrls, setStitchProgress);
+      setStitchedVideoUrl(result.url);
+      toast.success(`Video stitched! Duration: ${Math.round(result.duration)}s`);
+    } catch (error) {
+      console.error("Stitch error:", error);
+      toast.error("Failed to stitch videos");
+    } finally {
+      setIsStitching(false);
+    }
+  };
+
+  // Download stitched video
+  const handleDownloadStitched = () => {
+    if (!stitchedVideoUrl) return;
+    const a = document.createElement('a');
+    a.href = stitchedVideoUrl;
+    a.download = 'final-music-video.webm';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
 
   // Render phase content
   const renderPhase = () => {
@@ -855,6 +927,47 @@ Narrative Type: ${songAnalysis.narrativeType}
               isComplete={true}
             />
 
+            {/* Stitched Video Section */}
+            {stitchedVideoUrl ? (
+              <div className="rounded-xl border-2 border-primary bg-card p-6">
+                <h3 className="font-semibold mb-4 flex items-center gap-2">
+                  <Check className="w-5 h-5 text-primary" />
+                  Final Music Video
+                </h3>
+                <video 
+                  src={stitchedVideoUrl} 
+                  className="w-full rounded-lg aspect-video" 
+                  controls 
+                />
+                <Button 
+                  className="w-full mt-4"
+                  onClick={handleDownloadStitched}
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download Final Video
+                </Button>
+              </div>
+            ) : (
+              <Button 
+                onClick={handleStitchVideos}
+                disabled={isStitching}
+                className="w-full bg-gradient-to-r from-primary to-primary/80"
+                size="lg"
+              >
+                {isStitching ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Stitching... {stitchProgress?.progress?.toFixed(0) || 0}%
+                  </>
+                ) : (
+                  <>
+                    <Film className="w-4 h-4 mr-2" />
+                    Stitch into Final Video
+                  </>
+                )}
+              </Button>
+            )}
+
             {/* Final videos grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {clips.map(clip => (
@@ -864,20 +977,48 @@ Narrative Type: ${songAnalysis.narrativeType}
                     className="w-full aspect-video object-cover"
                     controls
                   />
-                  <div className="p-3">
+                  <div className="p-3 flex items-center justify-between">
                     <p className="text-sm text-muted-foreground">Clip {clip.index + 1}</p>
+                    {clip.error && (
+                      <Badge variant="outline" className="text-xs text-orange-500">
+                        Used original
+                      </Badge>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               <Button variant="outline" onClick={() => navigate('/simple')}>
                 Back to Simple Mode
               </Button>
-              <Button className="flex-1">
-                <Download className="w-4 h-4 mr-2" />
-                Download All
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setStitchedVideoUrl(null);
+                  setPhase('editing');
+                }}
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Edit & Regenerate
+              </Button>
+              <Button 
+                onClick={handleDownloadZip} 
+                disabled={isDownloading}
+                className="flex-1"
+              >
+                {isDownloading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating ZIP...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 mr-2" />
+                    Download All Clips (ZIP)
+                  </>
+                )}
               </Button>
             </div>
           </div>
