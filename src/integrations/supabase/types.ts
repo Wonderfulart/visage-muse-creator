@@ -103,6 +103,51 @@ export type Database = {
         }
         Relationships: []
       }
+      music_video_jobs: {
+        Row: {
+          audio_url: string
+          character_image_url: string | null
+          completed_segments: number
+          created_at: string | null
+          error: string | null
+          final_video_url: string | null
+          id: string
+          status: string
+          total_segments: number
+          updated_at: string | null
+          use_lipsync: boolean
+          user_id: string | null
+        }
+        Insert: {
+          audio_url: string
+          character_image_url?: string | null
+          completed_segments?: number
+          created_at?: string | null
+          error?: string | null
+          final_video_url?: string | null
+          id?: string
+          status?: string
+          total_segments?: number
+          updated_at?: string | null
+          use_lipsync?: boolean
+          user_id?: string | null
+        }
+        Update: {
+          audio_url?: string
+          character_image_url?: string | null
+          completed_segments?: number
+          created_at?: string | null
+          error?: string | null
+          final_video_url?: string | null
+          id?: string
+          status?: string
+          total_segments?: number
+          updated_at?: string | null
+          use_lipsync?: boolean
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -219,6 +264,77 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      video_segments: {
+        Row: {
+          audio_segment_url: string | null
+          created_at: string | null
+          end_ms: number
+          error: string | null
+          final_video_url: string | null
+          id: string
+          job_id: string
+          prompt: string | null
+          prompt_version: string
+          segment_index: number
+          start_ms: number
+          sync_job_id: string | null
+          sync_status: string
+          synced_video_url: string | null
+          updated_at: string | null
+          veo_job_id: string | null
+          veo_status: string
+          veo_video_url: string | null
+        }
+        Insert: {
+          audio_segment_url?: string | null
+          created_at?: string | null
+          end_ms: number
+          error?: string | null
+          final_video_url?: string | null
+          id?: string
+          job_id: string
+          prompt?: string | null
+          prompt_version?: string
+          segment_index: number
+          start_ms: number
+          sync_job_id?: string | null
+          sync_status?: string
+          synced_video_url?: string | null
+          updated_at?: string | null
+          veo_job_id?: string | null
+          veo_status?: string
+          veo_video_url?: string | null
+        }
+        Update: {
+          audio_segment_url?: string | null
+          created_at?: string | null
+          end_ms?: number
+          error?: string | null
+          final_video_url?: string | null
+          id?: string
+          job_id?: string
+          prompt?: string | null
+          prompt_version?: string
+          segment_index?: number
+          start_ms?: number
+          sync_job_id?: string | null
+          sync_status?: string
+          synced_video_url?: string | null
+          updated_at?: string | null
+          veo_job_id?: string | null
+          veo_status?: string
+          veo_video_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_segments_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "music_video_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       videos: {
         Row: {
