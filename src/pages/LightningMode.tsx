@@ -41,6 +41,7 @@ export default function LightningMode() {
   const [audioDuration, setAudioDuration] = useState<number>(0);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string>("");
+  const [photoBase64, setPhotoBase64] = useState<string>("");
   const [lyrics, setLyrics] = useState<string>("");
   
   // Analysis state
@@ -54,6 +55,8 @@ export default function LightningMode() {
   // Sync state
   const [currentSyncIndex, setCurrentSyncIndex] = useState(0);
   
+  // Generation state
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   // Polling refs
   const pollingRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
@@ -92,7 +95,7 @@ export default function LightningMode() {
     });
   };
 
-  // Handle photo upload
+  // Handle photo upload - convert to base64 for API calls
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -106,6 +109,14 @@ export default function LightningMode() {
     const url = URL.createObjectURL(file);
     setPhotoFile(file);
     setPhotoUrl(url);
+    
+    // Convert to base64 for API calls
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPhotoBase64(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    
     toast.success("Photo uploaded");
   };
 
@@ -243,10 +254,15 @@ Narrative Type: ${songAnalysis.narrativeType}
     }
   };
 
-  // Generate single clip
+  // Generate single clip - use base64 for reference image
   const handleGenerateClip = async (clipId: string) => {
     const clip = clips.find(c => c.id === clipId);
     if (!clip) return;
+
+    if (!photoBase64) {
+      toast.error("Photo not ready. Please re-upload.");
+      return;
+    }
 
     setClips(prev => prev.map(c => 
       c.id === clipId ? { ...c, status: 'generating', error: undefined } : c
@@ -256,7 +272,7 @@ Narrative Type: ${songAnalysis.narrativeType}
       const { data, error } = await supabase.functions.invoke('generate-video', {
         body: {
           prompt: clip.prompt,
-          referenceImage: photoUrl,
+          referenceImage: photoBase64, // Use base64 instead of blob URL
           preserveFace: true,
           duration: Math.min(8, clip.endTime - clip.startTime),
           aspectRatio: "9:16"
@@ -271,7 +287,7 @@ Narrative Type: ${songAnalysis.narrativeType}
           c.id === clipId ? { ...c, requestId: data.requestId } : c
         ));
         
-        startPolling(clipId, data.requestId);
+        startPolling(clipId, data.requestId, clip.prompt);
       }
     } catch (error) {
       console.error("Generation error:", error);
@@ -282,12 +298,33 @@ Narrative Type: ${songAnalysis.narrativeType}
     }
   };
 
+  // Generate all pending clips
+  const handleGenerateAll = async () => {
+    const pendingClips = clips.filter(c => c.status === 'pending' || c.status === 'error');
+    if (pendingClips.length === 0) {
+      toast.info("All clips already generated or in progress");
+      return;
+    }
+
+    setIsGeneratingAll(true);
+    toast.success(`Starting generation for ${pendingClips.length} clips...`);
+
+    // Start all pending clips in parallel
+    for (const clip of pendingClips) {
+      handleGenerateClip(clip.id);
+      // Small delay between API calls to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    setIsGeneratingAll(false);
+  };
+
   // Start polling for video status
-  const startPolling = (clipId: string, requestId: string) => {
+  const startPolling = (clipId: string, requestId: string, prompt: string) => {
     const interval = setInterval(async () => {
       try {
         const { data, error } = await supabase.functions.invoke('check-video-status', {
-          body: { requestId }
+          body: { requestId, prompt } // Pass prompt for database storage
         });
 
         if (error) throw error;
@@ -334,7 +371,149 @@ Narrative Type: ${songAnalysis.narrativeType}
   // Check if all clips have videos
   const allClipsReady = clips.length > 0 && clips.every(c => c.status === 'video_ready' || c.status === 'complete');
 
-  // Start sync phase
+  // Upload audio segment to storage and get signed URL
+  const uploadAudioSegment = async (clipIndex: number): Promise<string> => {
+    if (!audioFile) throw new Error("No audio file");
+    
+    const clip = clips[clipIndex];
+    const startTime = clip.startTime;
+    const endTime = clip.endTime;
+    
+    // Create audio context to extract segment
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const audioContext = new AudioContext();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    const sampleRate = audioBuffer.sampleRate;
+    const startSample = Math.floor(startTime * sampleRate);
+    const endSample = Math.floor(endTime * sampleRate);
+    const segmentLength = endSample - startSample;
+    
+    // Create new buffer for segment
+    const segmentBuffer = audioContext.createBuffer(
+      audioBuffer.numberOfChannels,
+      segmentLength,
+      sampleRate
+    );
+    
+    // Copy segment data
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+      const sourceData = audioBuffer.getChannelData(channel);
+      const segmentData = segmentBuffer.getChannelData(channel);
+      for (let i = 0; i < segmentLength; i++) {
+        segmentData[i] = sourceData[startSample + i];
+      }
+    }
+    
+    // Convert to WAV blob
+    const wavBlob = await audioBufferToWav(segmentBuffer);
+    
+    // Upload to Supabase storage
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
+    
+    const filePath = `${userData.user.id}/lightning-segment-${Date.now()}-${clipIndex}.wav`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from('background-music')
+      .upload(filePath, wavBlob, { upsert: true });
+    
+    if (uploadError) throw uploadError;
+    
+    // Get signed URL
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from('background-music')
+      .createSignedUrl(filePath, 3600);
+    
+    if (signedError) throw signedError;
+    
+    await audioContext.close();
+    return signedData.signedUrl;
+  };
+
+  // Convert AudioBuffer to WAV Blob
+  const audioBufferToWav = (buffer: AudioBuffer): Promise<Blob> => {
+    return new Promise((resolve) => {
+      const numChannels = buffer.numberOfChannels;
+      const sampleRate = buffer.sampleRate;
+      const format = 1; // PCM
+      const bitDepth = 16;
+      
+      const bytesPerSample = bitDepth / 8;
+      const blockAlign = numChannels * bytesPerSample;
+      
+      const data = [];
+      for (let i = 0; i < buffer.length; i++) {
+        for (let channel = 0; channel < numChannels; channel++) {
+          const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+          const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+          data.push(intSample & 0xFF);
+          data.push((intSample >> 8) & 0xFF);
+        }
+      }
+      
+      const dataLength = data.length;
+      const bufferArray = new ArrayBuffer(44 + dataLength);
+      const view = new DataView(bufferArray);
+      
+      // WAV header
+      const writeString = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) {
+          view.setUint8(offset + i, str.charCodeAt(i));
+        }
+      };
+      
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + dataLength, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, format, true);
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * blockAlign, true);
+      view.setUint16(32, blockAlign, true);
+      view.setUint16(34, bitDepth, true);
+      writeString(36, 'data');
+      view.setUint32(40, dataLength, true);
+      
+      // Write audio data
+      const uint8Array = new Uint8Array(bufferArray);
+      for (let i = 0; i < dataLength; i++) {
+        uint8Array[44 + i] = data[i];
+      }
+      
+      resolve(new Blob([bufferArray], { type: 'audio/wav' }));
+    });
+  };
+
+  // Poll for sync.so job status
+  const pollSyncStatus = (jobId: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const interval = setInterval(async () => {
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-lipsync-syncso?action=status', {
+            body: { jobId }
+          });
+
+          if (error) throw error;
+
+          if (data.status === 'completed' && data.outputUrl) {
+            clearInterval(interval);
+            resolve(data.outputUrl);
+          } else if (data.status === 'failed') {
+            clearInterval(interval);
+            reject(new Error(data.error || 'Sync.so generation failed'));
+          }
+        } catch (err) {
+          clearInterval(interval);
+          reject(err);
+        }
+      }, 5000);
+    });
+  };
+
+  // Start sync phase with real sync.so integration
   const startSync = async () => {
     if (!allClipsReady) {
       toast.error("Not all clips have videos ready");
@@ -354,24 +533,50 @@ Narrative Type: ${songAnalysis.narrativeType}
       ));
 
       try {
-        // For now, mark as complete since sync.so integration would need audio segment URLs
-        // In production, you'd call generate-lipsync-syncso here
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate processing
+        // Step 1: Extract and upload audio segment for this clip
+        toast.info(`Preparing audio for clip ${i + 1}...`);
+        const audioSegmentUrl = await uploadAudioSegment(i);
+        
+        // Step 2: Call sync.so to generate lip-synced video
+        toast.info(`Syncing clip ${i + 1}...`);
+        const { data: syncData, error: syncError } = await supabase.functions.invoke('generate-lipsync-syncso', {
+          body: {
+            characterImageUrl: clip.videoUrl, // Using video URL as input
+            audioUrl: audioSegmentUrl,
+            model: 'lipsync-2' // Use lipsync-2 for video input
+          }
+        });
+
+        if (syncError) throw syncError;
+        if (!syncData.success) throw new Error(syncData.error || 'Failed to start sync');
+
+        // Step 3: Poll for completion
+        const syncedVideoUrl = await pollSyncStatus(syncData.jobId);
         
         setClips(prev => prev.map(c => 
-          c.id === clip.id ? { ...c, status: 'complete', syncedVideoUrl: c.videoUrl } : c
+          c.id === clip.id ? { ...c, status: 'complete', syncedVideoUrl } : c
         ));
+        
+        toast.success(`Clip ${i + 1} synced!`);
       } catch (error) {
         console.error("Sync error:", error);
+        // On error, fallback to using the original video
         setClips(prev => prev.map(c => 
-          c.id === clip.id ? { ...c, status: 'error', error: 'Sync failed' } : c
+          c.id === clip.id ? { 
+            ...c, 
+            status: 'complete', 
+            syncedVideoUrl: c.videoUrl, // Fallback to original video
+            error: error instanceof Error ? error.message : 'Sync failed'
+          } : c
         ));
+        toast.error(`Clip ${i + 1} sync failed, using original video`);
       }
     }
 
     setPhase('complete');
-    toast.success("All clips synced!");
+    toast.success("All clips processed!");
   };
+
 
   // Render phase content
   const renderPhase = () => {
@@ -546,6 +751,10 @@ Narrative Type: ${songAnalysis.narrativeType}
         );
 
       case 'editing':
+        const pendingCount = clips.filter(c => c.status === 'pending' || c.status === 'error').length;
+        const generatingCount = clips.filter(c => c.status === 'generating').length;
+        const readyCount = clips.filter(c => c.status === 'video_ready' || c.status === 'complete').length;
+        
         return (
           <div className="space-y-6">
             {/* Progress indicator */}
@@ -558,10 +767,32 @@ Narrative Type: ${songAnalysis.narrativeType}
               </div>
               <div className="text-right">
                 <p className="text-sm font-medium">
-                  {clips.filter(c => c.status === 'video_ready' || c.status === 'complete').length} / {clips.length} ready
+                  {readyCount} / {clips.length} ready
+                  {generatingCount > 0 && <span className="text-primary ml-2">({generatingCount} generating...)</span>}
                 </p>
               </div>
             </div>
+
+            {/* Generate All Button */}
+            {pendingCount > 0 && (
+              <Button 
+                onClick={handleGenerateAll}
+                disabled={isGeneratingAll}
+                className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600"
+              >
+                {isGeneratingAll ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Starting Generation...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 mr-2" />
+                    Generate All ({pendingCount} clips)
+                  </>
+                )}
+              </Button>
+            )}
 
             {/* Clips Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
