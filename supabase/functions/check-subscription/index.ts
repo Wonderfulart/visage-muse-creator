@@ -175,15 +175,23 @@ serve(async (req) => {
       logStep("No active subscription found");
     }
 
-    // Update profile with subscription info
+    // Update profile with subscription info (no stripe_customer_id - stored separately)
     await supabaseClient
       .from("profiles")
       .update({
-        stripe_customer_id: customerId,
         subscription_tier: subscriptionTier,
         subscription_end: subscriptionEnd,
       })
       .eq("id", user.id);
+
+    // Store stripe_customer_id in separate admin-only table
+    await supabaseClient
+      .from("stripe_customers")
+      .upsert({
+        user_id: user.id,
+        stripe_customer_id: customerId,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
 
     const limit = TIER_LIMITS[subscriptionTier] || TIER_LIMITS.free;
 
