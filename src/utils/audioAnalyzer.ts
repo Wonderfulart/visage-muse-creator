@@ -41,115 +41,144 @@ export async function analyzeAudio(
   segmentCount: number,
   onProgress?: (progress: number) => void
 ): Promise<FullAudioAnalysis> {
-  // Create a timeout promise
-  const TIMEOUT_MS = 30000; // 30 second timeout
+  const TIMEOUT_MS = 15000; // 15 second timeout (reduced for faster fallback)
   
-  const analysisPromise = new Promise<FullAudioAnalysis>((resolve, reject) => {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const reader = new FileReader();
-
-    reader.onload = async (e) => {
+  console.log('[AudioAnalyzer] Starting analysis for file:', audioFile.name, 'size:', audioFile.size);
+  
+  // Validate file first
+  if (!audioFile || audioFile.size === 0) {
+    throw new Error('Invalid audio file');
+  }
+  
+  let audioContext: AudioContext | null = null;
+  
+  const analysisPromise = new Promise<FullAudioAnalysis>(async (resolve, reject) => {
+    try {
+      onProgress?.(5);
+      
+      // Read file as ArrayBuffer first
+      console.log('[AudioAnalyzer] Reading file as ArrayBuffer...');
+      const arrayBuffer = await audioFile.arrayBuffer();
+      console.log('[AudioAnalyzer] ArrayBuffer size:', arrayBuffer.byteLength);
+      
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Empty audio file');
+      }
+      
+      onProgress?.(10);
+      
+      // Create AudioContext
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      console.log('[AudioAnalyzer] AudioContext created, decoding audio...');
+      
+      // Decode audio with its own timeout
+      let audioBuffer: AudioBuffer;
       try {
-        onProgress?.(10);
-        console.log('[AudioAnalyzer] Starting audio decode...');
+        audioBuffer = await Promise.race([
+          audioContext.decodeAudioData(arrayBuffer.slice(0)), // Use slice to copy buffer
+          new Promise<never>((_, rej) => 
+            setTimeout(() => rej(new Error('Audio decode timeout')), 10000)
+          )
+        ]);
+      } catch (decodeError) {
+        console.error('[AudioAnalyzer] Decode failed:', decodeError);
+        throw new Error('Failed to decode audio file. Try a different format (MP3, WAV, or M4A).');
+      }
+      
+      console.log('[AudioAnalyzer] Audio decoded successfully. Duration:', audioBuffer.duration, 'seconds');
+      onProgress?.(30);
+      
+      const channelData = audioBuffer.getChannelData(0);
+      const sampleRate = audioBuffer.sampleRate;
+      const duration = audioBuffer.duration;
+      const segmentDuration = duration / segmentCount;
+      const samplesPerSegment = Math.floor(sampleRate * segmentDuration);
+      
+      const segments: AudioAnalysis[] = [];
+      let totalEnergy = 0;
+      let totalTempo = 0;
+      
+      for (let i = 0; i < segmentCount; i++) {
+        const startSample = i * samplesPerSegment;
+        const endSample = Math.min(startSample + samplesPerSegment, channelData.length);
+        const segmentData = channelData.slice(startSample, endSample);
         
-        const arrayBuffer = e.target?.result as ArrayBuffer;
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        // Calculate RMS energy
+        const energy = calculateRMS(segmentData);
         
-        console.log('[AudioAnalyzer] Audio decoded, analyzing segments...');
-        onProgress?.(30);
+        // Estimate tempo using zero crossings and peak detection
+        const tempo = estimateTempo(segmentData, sampleRate);
         
-        const channelData = audioBuffer.getChannelData(0);
-        const sampleRate = audioBuffer.sampleRate;
-        const duration = audioBuffer.duration;
-        const segmentDuration = duration / segmentCount;
-        const samplesPerSegment = Math.floor(sampleRate * segmentDuration);
+        // Calculate beat density
+        const beatDensity = tempo / 60; // Beats per second
         
-        const segments: AudioAnalysis[] = [];
-        let totalEnergy = 0;
-        let totalTempo = 0;
+        // Determine dynamics based on energy and position
+        const dynamics = determineDynamics(energy, i, segmentCount);
         
-        for (let i = 0; i < segmentCount; i++) {
-          const startSample = i * samplesPerSegment;
-          const endSample = Math.min(startSample + samplesPerSegment, channelData.length);
-          const segmentData = channelData.slice(startSample, endSample);
-          
-          // Calculate RMS energy
-          const energy = calculateRMS(segmentData);
-          
-          // Estimate tempo using zero crossings and peak detection
-          const tempo = estimateTempo(segmentData, sampleRate);
-          
-          // Calculate beat density
-          const beatDensity = tempo / 60; // Beats per second
-          
-          // Determine dynamics based on energy and position
-          const dynamics = determineDynamics(energy, i, segmentCount);
-          
-          segments.push({
-            segmentIndex: i,
-            energy: Math.min(1, energy * 3), // Normalize to 0-1 range
-            tempo: Math.round(tempo),
-            beatDensity: Math.round(beatDensity * 10) / 10,
-            dynamics
-          });
-          
-          totalEnergy += energy;
-          totalTempo += tempo;
-          
-          onProgress?.(30 + ((i + 1) / segmentCount) * 60);
-        }
-        
-        // Determine overall energy progression
-        const firstHalfEnergy = segments.slice(0, Math.floor(segmentCount / 2))
-          .reduce((sum, s) => sum + s.energy, 0) / Math.floor(segmentCount / 2);
-        const secondHalfEnergy = segments.slice(Math.floor(segmentCount / 2))
-          .reduce((sum, s) => sum + s.energy, 0) / Math.ceil(segmentCount / 2);
-        
-        let energyProgression: FullAudioAnalysis['energyProgression'];
-        const energyDiff = secondHalfEnergy - firstHalfEnergy;
-        
-        if (energyDiff > 0.15) {
-          energyProgression = 'building';
-        } else if (energyDiff < -0.15) {
-          energyProgression = 'fading';
-        } else {
-          // Check for variance
-          const variance = segments.reduce((sum, s) => 
-            sum + Math.pow(s.energy - (totalEnergy / segmentCount), 2), 0) / segmentCount;
-          energyProgression = variance > 0.05 ? 'dynamic' : 'steady';
-        }
-        
-        onProgress?.(100);
-        console.log('[AudioAnalyzer] Analysis complete');
-        
-        await audioContext.close();
-        
-        resolve({
-          segments,
-          averageEnergy: totalEnergy / segmentCount,
-          averageTempo: Math.round(totalTempo / segmentCount),
-          energyProgression
+        segments.push({
+          segmentIndex: i,
+          energy: Math.min(1, energy * 3), // Normalize to 0-1 range
+          tempo: Math.round(tempo),
+          beatDensity: Math.round(beatDensity * 10) / 10,
+          dynamics
         });
         
-      } catch (error) {
-        console.error('[AudioAnalyzer] Error during analysis:', error);
-        audioContext.close();
-        reject(error);
+        totalEnergy += energy;
+        totalTempo += tempo;
+        
+        onProgress?.(30 + ((i + 1) / segmentCount) * 60);
       }
-    };
-
-    reader.onerror = () => {
-      console.error('[AudioAnalyzer] Failed to read audio file');
-      reject(new Error('Failed to read audio file'));
-    };
-    
-    reader.readAsArrayBuffer(audioFile);
+      
+      // Determine overall energy progression
+      const firstHalfEnergy = segments.slice(0, Math.floor(segmentCount / 2))
+        .reduce((sum, s) => sum + s.energy, 0) / Math.floor(segmentCount / 2);
+      const secondHalfEnergy = segments.slice(Math.floor(segmentCount / 2))
+        .reduce((sum, s) => sum + s.energy, 0) / Math.ceil(segmentCount / 2);
+      
+      let energyProgression: FullAudioAnalysis['energyProgression'];
+      const energyDiff = secondHalfEnergy - firstHalfEnergy;
+      
+      if (energyDiff > 0.15) {
+        energyProgression = 'building';
+      } else if (energyDiff < -0.15) {
+        energyProgression = 'fading';
+      } else {
+        // Check for variance
+        const variance = segments.reduce((sum, s) => 
+          sum + Math.pow(s.energy - (totalEnergy / segmentCount), 2), 0) / segmentCount;
+        energyProgression = variance > 0.05 ? 'dynamic' : 'steady';
+      }
+      
+      onProgress?.(100);
+      console.log('[AudioAnalyzer] Analysis complete:', segments.length, 'segments');
+      
+      resolve({
+        segments,
+        averageEnergy: totalEnergy / segmentCount,
+        averageTempo: Math.round(totalTempo / segmentCount),
+        energyProgression
+      });
+      
+    } catch (error) {
+      console.error('[AudioAnalyzer] Error during analysis:', error);
+      reject(error);
+    } finally {
+      if (audioContext && audioContext.state !== 'closed') {
+        try {
+          await audioContext.close();
+        } catch (e) {
+          // Ignore close errors
+        }
+      }
+    }
   });
 
   // Race against timeout
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close().catch(() => {});
+      }
       reject(new Error(`Audio analysis timed out after ${TIMEOUT_MS / 1000} seconds`));
     }, TIMEOUT_MS);
   });
