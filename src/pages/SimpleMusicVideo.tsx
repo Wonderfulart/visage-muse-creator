@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
 import { splitAudio, AudioSegment, formatTime } from "@/utils/audioSplitter";
-import { parseLyrics, LyricSection } from "@/utils/lyricsParser";
+import { parseLyrics, LyricSection, analyzeSongNarrative } from "@/utils/lyricsParser";
+import { analyzeAudio, getNarrativePosition, AudioAnalysis } from "@/utils/audioAnalyzer";
 import { stitchVideos, StitchProgress } from "@/utils/videoStitcher";
 import { downloadClipsAsZip } from "@/utils/zipDownloader";
 
@@ -620,43 +621,89 @@ const SimpleMusicVideo = () => {
       const sceneCount = Math.min(Math.floor(audioDuration / 6), 10);
       const sceneDuration = audioDuration / sceneCount;
       
-      setStatusMessage(`Analyzing lyrics for ${sceneCount} scenes...`);
-      setProgress(10);
+      setStatusMessage(`Analyzing audio and lyrics for ${sceneCount} scenes...`);
+      setProgress(8);
 
-      // Step 2: Parse lyrics into sections
+      // Step 2: Analyze audio for tempo, energy, and rhythm
+      let audioAnalysisData: AudioAnalysis[] = [];
+      try {
+        setStatusMessage("Analyzing audio rhythm and energy...");
+        const fullAnalysis = await analyzeAudio(audioFile, sceneCount, (p) => {
+          setProgress(8 + (p * 0.07)); // 8-15%
+        });
+        audioAnalysisData = fullAnalysis.segments;
+        console.log('Audio analysis:', fullAnalysis);
+      } catch (audioError) {
+        console.warn('Audio analysis failed, using defaults:', audioError);
+        // Create default analysis if audio analysis fails
+        audioAnalysisData = Array.from({ length: sceneCount }, (_, i) => ({
+          segmentIndex: i,
+          energy: 0.5,
+          tempo: 100,
+          beatDensity: 1.5,
+          dynamics: 'building' as const
+        }));
+      }
+
+      setStatusMessage("Analyzing song narrative...");
+      setProgress(15);
+
+      // Step 3: Analyze song narrative
+      const songAnalysis = analyzeSongNarrative(lyrics);
+      console.log('Song narrative analysis:', songAnalysis);
+
+      // Step 4: Parse lyrics into sections with story elements
       const lyricSections = parseLyrics(lyrics, sceneCount);
       console.log('Parsed lyric sections:', lyricSections);
 
-      // Step 3: Upload reference image
+      // Verify lyric uniqueness
+      const uniqueLyrics = new Set(lyricSections.map(s => s.text.trim())).size;
+      if (uniqueLyrics < sceneCount / 2) {
+        toast.warning(`Only ${uniqueLyrics} unique lyric sections for ${sceneCount} scenes. Consider adding more lyrics.`);
+      }
+
+      // Step 5: Upload reference image
       setStatusMessage("Uploading reference image...");
-      setProgress(15);
+      setProgress(18);
       const imageUrl = await uploadToStorage(
         mediaFile,
         'videos',
         `lyrics-reference-${Date.now()}.${mediaFile.name.split('.').pop()}`
       );
 
-      // Step 4: Generate scene prompts with lyrics context
-      setStatusMessage("Creating visual prompts from lyrics...");
-      setProgress(20);
+      // Step 6: Generate narrative-aware scene prompts
+      setStatusMessage("Creating narrative-driven visual prompts...");
+      setProgress(22);
 
-      const scenes = lyricSections.map((section, i) => ({
-        index: i,
-        startTime: i * sceneDuration,
-        endTime: (i + 1) * sceneDuration,
-        duration: sceneDuration,
-        energyLevel: 0.6,
-        tempo: "medium tempo"
-      }));
+      // Build enhanced scenes with real audio data and narrative position
+      const scenes = lyricSections.map((section, i) => {
+        const audioData = audioAnalysisData[i] || { energy: 0.5, tempo: 100, beatDensity: 1.5 };
+        const narrativePosition = getNarrativePosition(i, sceneCount);
+        
+        return {
+          index: i,
+          startTime: i * sceneDuration,
+          endTime: (i + 1) * sceneDuration,
+          duration: sceneDuration,
+          energyLevel: audioData.energy,
+          tempo: audioData.tempo,
+          beatDensity: audioData.beatDensity,
+          narrativePosition,
+          sectionType: section.type
+        };
+      });
+
+      console.log('Scenes with audio analysis:', scenes);
 
       const { data: promptData, error: promptError } = await supabase.functions.invoke('generate-scene-prompts', {
         body: {
-          basePrompt: `Visual style inspired by the reference image. Create cinematic music video scenes with dynamic camera movement.`,
+          basePrompt: `Create a cohesive visual STORY for this music video. Maintain consistent character appearance using reference image. Match visual pacing to the rhythm of the music.`,
           scenes,
           aspectRatio: '9:16',
           preserveFace: true,
           lyrics: lyrics,
-          lyricSections: lyricSections
+          lyricSections: lyricSections,
+          songAnalysis: songAnalysis
         }
       });
 

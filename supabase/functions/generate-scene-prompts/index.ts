@@ -11,13 +11,25 @@ interface SceneInput {
   endTime: number;
   duration: number;
   energyLevel?: number;
-  tempo?: string;
+  tempo?: number;
+  beatDensity?: number;
+  narrativePosition?: 'opening' | 'rising' | 'climax' | 'resolution';
+  sectionType?: 'verse' | 'chorus' | 'bridge' | 'intro' | 'outro' | 'section';
 }
 
 interface LyricSection {
   index: number;
   text: string;
   type: string;
+  storyElements?: string[];
+  emotionalArc?: string;
+}
+
+interface SongAnalysis {
+  overallTheme?: string;
+  narrativeType?: string;
+  keyImagery?: string[];
+  emotionalJourney?: string;
 }
 
 // Words that commonly trigger Vertex AI content filters
@@ -34,59 +46,26 @@ const FLAGGED_PATTERNS = [
 function sanitizePrompt(prompt: string): string {
   let sanitized = prompt;
   
-  // Replace potentially flagged words with safe visual alternatives
   const replacements: Record<string, string> = {
-    'drug': 'abstract particle',
-    'drugs': 'abstract particles',
-    'smoking': 'atmospheric haze',
-    'drunk': 'dreamlike motion',
-    'alcohol': 'liquid reflection',
-    'gun': 'geometric shape',
-    'weapon': 'angular form',
-    'kill': 'transform',
-    'murder': 'dissolve',
-    'blood': 'crimson light',
-    'death': 'transition',
-    'die': 'fade',
-    'dying': 'fading',
-    'violent': 'dynamic',
-    'violence': 'motion',
-    'sex': 'movement',
-    'sexy': 'elegant',
-    'naked': 'silhouette',
-    'nude': 'abstract form',
-    'kiss': 'approach',
-    'kissing': 'moving closer',
-    'intimate': 'close-up',
-    'romantic': 'soft-lit',
-    'love': 'warmth',
-    'lover': 'figure',
-    'bed': 'soft surface',
-    'bedroom': 'dimly lit interior',
-    'hate': 'intensity',
-    'hating': 'intense',
-    'fight': 'dynamic movement',
-    'fighting': 'moving dynamically',
-    'punch': 'swift motion',
-    'hit': 'impact',
-    'hurt': 'react',
-    'pain': 'expression',
-    'suffer': 'experience',
-    'suffering': 'experiencing',
-    'sad': 'contemplative',
-    'depressed': 'introspective',
-    'depression': 'stillness',
-    'crying': 'emotional expression',
-    'tears': 'light reflections',
-    'lonely': 'solitary',
-    'loneliness': 'solitude',
-    'heartbreak': 'emotional moment',
-    'heartbroken': 'pensive',
-    'night': 'low-light environment',
-    'dark': 'dimly lit',
-    'darkness': 'shadow play',
-    'shadow': 'silhouette',
-    'shadows': 'silhouettes',
+    'drug': 'abstract particle', 'drugs': 'abstract particles',
+    'smoking': 'atmospheric haze', 'drunk': 'dreamlike motion',
+    'alcohol': 'liquid reflection', 'gun': 'geometric shape',
+    'weapon': 'angular form', 'kill': 'transform', 'murder': 'dissolve',
+    'blood': 'crimson light', 'death': 'transition', 'die': 'fade',
+    'dying': 'fading', 'violent': 'dynamic', 'violence': 'motion',
+    'sex': 'movement', 'sexy': 'elegant', 'naked': 'silhouette',
+    'nude': 'abstract form', 'kiss': 'approach', 'kissing': 'moving closer',
+    'intimate': 'close-up', 'romantic': 'soft-lit', 'love': 'warmth',
+    'lover': 'figure', 'bed': 'soft surface', 'bedroom': 'dimly lit interior',
+    'hate': 'intensity', 'hating': 'intense', 'fight': 'dynamic movement',
+    'fighting': 'moving dynamically', 'punch': 'swift motion', 'hit': 'impact',
+    'hurt': 'react', 'pain': 'expression', 'suffer': 'experience',
+    'suffering': 'experiencing', 'sad': 'contemplative', 'depressed': 'introspective',
+    'depression': 'stillness', 'crying': 'emotional expression',
+    'tears': 'light reflections', 'lonely': 'solitary', 'loneliness': 'solitude',
+    'heartbreak': 'emotional moment', 'heartbroken': 'pensive',
+    'night': 'low-light environment', 'dark': 'dimly lit',
+    'darkness': 'shadow play', 'shadow': 'silhouette', 'shadows': 'silhouettes',
   };
 
   for (const [word, replacement] of Object.entries(replacements)) {
@@ -94,13 +73,47 @@ function sanitizePrompt(prompt: string): string {
     sanitized = sanitized.replace(regex, replacement);
   }
 
-  // Remove any quotes or lyrics that might be embedded
   sanitized = sanitized.replace(/["'].*?["']/g, '');
-  
-  // Remove phrases that indicate lyrics or dialogue
   sanitized = sanitized.replace(/\b(sings?|says?|speaks?|whispers?|shouts?)\s+["']?[^.]+["']?/gi, 'performs expressively');
   
   return sanitized.trim();
+}
+
+// Get camera movement based on tempo and energy
+function getCameraMovement(tempo: number, energy: number, narrativePosition: string): string {
+  if (tempo > 140 || energy > 0.8) {
+    return 'rapid tracking shots, quick cuts, handheld energy, dynamic dolly movements';
+  } else if (tempo > 100 || energy > 0.6) {
+    return 'smooth crane movements, steady tracking, moderate push-ins, orbital shots';
+  } else if (tempo > 70 || energy > 0.4) {
+    return 'slow dolly, gentle push-ins, floating camera, lingering shots';
+  } else {
+    return 'static wide shots, very slow push-ins, contemplative stillness, breathing room';
+  }
+}
+
+// Get visual intensity based on section type
+function getSectionVisuals(sectionType: string): string {
+  const visuals: Record<string, string> = {
+    'intro': 'wide establishing shot, slow reveal, building anticipation, mysterious atmosphere',
+    'verse': 'character-focused, storytelling progression, conversational pacing, intimate framing',
+    'chorus': 'maximum visual energy, dramatic reveals, dynamic movement, emotional peak, expansive shots',
+    'bridge': 'transition moment, change of scenery, visual breath, unexpected angle shifts',
+    'outro': 'resolution and closure, pull-back shots, fading atmosphere, final statement',
+    'section': 'balanced composition, narrative continuation, steady progression'
+  };
+  return visuals[sectionType] || visuals['section'];
+}
+
+// Get narrative arc guidance
+function getNarrativeGuidance(position: string, sceneIndex: number, totalScenes: number): string {
+  const guidance: Record<string, string> = {
+    'opening': `SCENE ${sceneIndex + 1}/${totalScenes} - OPENING: Establish the visual world. Introduce the character/setting. Create intrigue and anticipation. Wide shots transitioning to medium.`,
+    'rising': `SCENE ${sceneIndex + 1}/${totalScenes} - RISING ACTION: Build visual tension. Develop the story. Increase movement and energy. Layer complexity.`,
+    'climax': `SCENE ${sceneIndex + 1}/${totalScenes} - CLIMAX: Peak visual intensity. Maximum emotional impact. Dynamic camera work. The visual high point.`,
+    'resolution': `SCENE ${sceneIndex + 1}/${totalScenes} - RESOLUTION: Wind down visually. Bring closure. Echo opening imagery. Contemplative, final statement.`
+  };
+  return guidance[position] || guidance['rising'];
 }
 
 serve(async (req) => {
@@ -109,82 +122,139 @@ serve(async (req) => {
   }
 
   try {
-    const { basePrompt, scenes, aspectRatio, preserveFace, lyrics, lyricSections } = await req.json();
+    const { basePrompt, scenes, aspectRatio, preserveFace, lyrics, lyricSections, songAnalysis } = await req.json();
 
-    // Sanitize the base prompt first
     const sanitizedBasePrompt = sanitizePrompt(basePrompt);
-    console.log('Generating prompts for', scenes.length, 'scenes');
-    console.log('Original base prompt:', basePrompt?.substring(0, 100));
-    console.log('Sanitized base prompt:', sanitizedBasePrompt.substring(0, 100));
+    console.log('Generating NARRATIVE prompts for', scenes.length, 'scenes');
     console.log('Lyrics mode:', lyrics ? 'enabled' : 'disabled');
+    console.log('Song analysis provided:', songAnalysis ? 'yes' : 'no');
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Build scene descriptions with optional lyric context
     const typedLyricSections = lyricSections as LyricSection[] | undefined;
+    const typedSongAnalysis = songAnalysis as SongAnalysis | undefined;
+    
+    // Build enhanced scene descriptions with rhythm and narrative context
     const sceneDescriptions = (scenes as SceneInput[]).map((scene, i) => {
-      const energyDesc = scene.energyLevel 
-        ? scene.energyLevel > 0.7 ? "high energy" : scene.energyLevel > 0.4 ? "medium energy" : "calm/low energy"
-        : "unknown energy";
-      const tempoDesc = scene.tempo || "medium tempo";
+      const energy = scene.energyLevel || 0.5;
+      const tempo = scene.tempo || 100;
+      const narrativePos = scene.narrativePosition || 'rising';
+      const sectionType = scene.sectionType || 'section';
       
-      // Include lyric context if available (sanitized)
+      const cameraMovement = getCameraMovement(tempo, energy, narrativePos);
+      const sectionVisuals = getSectionVisuals(sectionType);
+      const narrativeGuide = getNarrativeGuidance(narrativePos, i, scenes.length);
+      
       let lyricContext = "";
       if (typedLyricSections && typedLyricSections[i]) {
-        const sanitizedLyric = sanitizePrompt(typedLyricSections[i].text);
-        // Extract key visual themes from lyrics instead of using them directly
-        lyricContext = ` | Visual mood from theme: "${sanitizedLyric.substring(0, 60)}..."`;
+        const section = typedLyricSections[i];
+        const sanitizedLyric = sanitizePrompt(section.text);
+        const storyElements = section.storyElements?.join(', ') || '';
+        lyricContext = `
+LYRIC THEMES: "${sanitizedLyric.substring(0, 80)}..."
+STORY ELEMENTS: ${storyElements || 'visual metaphor'}
+EMOTIONAL ARC: ${section.emotionalArc || 'continuing'}`;
       }
       
-      return `Scene ${scene.index + 1} (${scene.startTime.toFixed(1)}s - ${scene.endTime.toFixed(1)}s, ${scene.duration.toFixed(1)}s): ${energyDesc}, ${tempoDesc}${lyricContext}`;
+      return `
+---
+${narrativeGuide}
+SECTION TYPE: ${sectionType.toUpperCase()}
+TEMPO: ${tempo} BPM | ENERGY: ${(energy * 100).toFixed(0)}%
+CAMERA STYLE: ${cameraMovement}
+VISUAL TREATMENT: ${sectionVisuals}${lyricContext}
+TIMING: ${scene.startTime.toFixed(1)}s - ${scene.endTime.toFixed(1)}s (${scene.duration.toFixed(1)}s)
+---`;
     }).join("\n");
 
-    // Enhanced system prompt for lyrics mode
-    const lyricsInstructions = lyrics ? `
+    // Build song context if available
+    let songContext = "";
+    if (typedSongAnalysis) {
+      songContext = `
+OVERALL SONG NARRATIVE:
+- Theme: ${typedSongAnalysis.overallTheme || 'artistic expression'}
+- Story Type: ${typedSongAnalysis.narrativeType || 'emotional journey'}
+- Key Imagery: ${typedSongAnalysis.keyImagery?.join(', ') || 'abstract visuals'}
+- Emotional Journey: ${typedSongAnalysis.emotionalJourney || 'dynamic progression'}`;
+    }
 
-LYRICS MODE ACTIVE:
-- You are creating visuals for a music video based on song lyrics
-- DO NOT include any text, words, or lyrics in the prompts - only VISUAL descriptions
-- Interpret the MOOD and THEMES of each lyric section into abstract visuals
-- Create visual metaphors that match the emotional arc of the song
-- Use the reference image style consistently across all scenes
-- Focus on camera movement, color grading, and atmospheric effects that match the song's energy` : "";
+    const systemPrompt = `You are a VISUAL STORYTELLER creating a cohesive music video narrative. Your job is to create a VISUAL STORY that progresses scene by scene, matching the music's rhythm and emotion.
 
-    const systemPrompt = `You are a visual director creating prompts for Google Veo AI video generation. Generate ONLY safe, abstract visual descriptions.
+═══════════════════════════════════════════════════════════════
+CORE PRINCIPLE: LYRICS ARE STORYTELLING
+═══════════════════════════════════════════════════════════════
+Every song tells a story. Your visuals must:
+• CREATE A VISUAL NARRATIVE with beginning, development, climax, and resolution
+• Scene 1 ESTABLISHES the world/character - who, where, what
+• Middle scenes BUILD tension, show transformation, emotional growth
+• Final scenes RESOLVE or conclude the visual story
+• Even abstract visuals need NARRATIVE FLOW - not random disconnected clips
+• Each scene should feel like a chapter that leads to the next
 
-CRITICAL SAFETY RULES - FOLLOW STRICTLY:
-- Generate ONLY visual descriptions - NO dialogue, lyrics, text, or spoken words
-- Focus EXCLUSIVELY on: lighting, camera angles, movement, colors, atmosphere, abstract visuals
-- NEVER reference: relationships, romance, intimacy, violence, weapons, drugs, alcohol, death, sadness, depression
-- AVOID emotional themes - use ABSTRACT VISUAL metaphors instead
-- NO specific person names or celebrity references
-- NO suggestive, provocative, or mature content
-- Keep all prompts appropriate for general audiences${lyricsInstructions}
+═══════════════════════════════════════════════════════════════
+AUDIO RHYTHM MATCHING - THE VIDEO MUST FEEL LIKE THE MUSIC
+═══════════════════════════════════════════════════════════════
+• HIGH TEMPO (120+ BPM): Quick cuts, rapid camera movement, dynamic action, energetic motion
+• MEDIUM TEMPO (80-120 BPM): Balanced pacing, smooth transitions, moderate movement
+• LOW TEMPO (<80 BPM): Lingering shots, slow push-ins, contemplative stillness
+• ENERGY BUILDUP: Increasingly dynamic camera work as energy rises
+• QUIET MOMENTS: Stillness, soft focus, breathing room
+• DROPS/CHORUSES: Explosive movement, dramatic reveals, visual peaks
 
-VISUAL FOCUS:
-- Camera movements: tracking, dolly, crane, slow push-in, orbit
-- Lighting: neon, volumetric, silhouette, rim light, ambient glow
-- Atmosphere: fog, particles, lens flares, bokeh, reflections
-- Abstract elements: geometric shapes, light trails, fluid motion
-- Environment: industrial spaces, natural landscapes, abstract voids
+The visual PACE must FEEL like the music SOUNDS.
 
-PROMPT STRUCTURE:
-- Each prompt: 1-2 sentences, under 50 words
-- Use present tense, active voice
-- Match energy level to visual dynamism (not emotional content)
-- Aspect ratio is ${aspectRatio}
-- ${preserveFace ? "Maintain consistent character appearance across scenes using the reference image style" : "Focus on environment and abstract motion"}`;
+═══════════════════════════════════════════════════════════════
+SAFETY RULES - FOLLOW STRICTLY
+═══════════════════════════════════════════════════════════════
+• Generate ONLY visual descriptions - NO dialogue, lyrics, text, or spoken words
+• Focus on: lighting, camera angles, movement, colors, atmosphere, abstract visuals
+• NEVER reference: relationships, romance, intimacy, violence, weapons, drugs, alcohol, death
+• Use ABSTRACT VISUAL metaphors instead of literal interpretations
+• NO specific person names or celebrity references
+• Keep all prompts appropriate for general audiences
 
-    const userPrompt = `Base visual style (sanitized): "${sanitizedBasePrompt}"
+═══════════════════════════════════════════════════════════════
+VISUAL LANGUAGE
+═══════════════════════════════════════════════════════════════
+Camera: tracking, dolly, crane, push-in, orbit, handheld, steadicam, drone
+Lighting: neon, volumetric, silhouette, rim light, ambient glow, golden hour
+Atmosphere: fog, particles, lens flares, bokeh, reflections, haze
+Abstract: geometric shapes, light trails, fluid motion, fractal patterns
+Environment: industrial, natural landscapes, abstract voids, urban, ethereal
 
-Generate a unique, SAFE visual prompt for each scene. Focus on camera movement, lighting, and abstract visuals. Do NOT include any lyrics, dialogue, or emotional text.
-${lyrics ? "\nThis is for a MUSIC VIDEO - create visually cohesive scenes that flow together like a professional music video. Each scene should have dynamic camera movement and match the energy of the song.\n" : ""}
+═══════════════════════════════════════════════════════════════
+PROMPT FORMAT
+═══════════════════════════════════════════════════════════════
+• 1-2 sentences, under 50 words
+• Present tense, active voice
+• Include camera movement + lighting + atmosphere
+• Match visual energy to audio energy
+• Aspect ratio: ${aspectRatio}
+• ${preserveFace ? "Maintain consistent character appearance using reference image style" : "Focus on environment and abstract motion"}`;
+
+    const userPrompt = `BASE VISUAL STYLE: "${sanitizedBasePrompt}"
+${songContext}
+
+═══════════════════════════════════════════════════════════════
+CREATE A COHESIVE VISUAL NARRATIVE FOR THESE SCENES:
+═══════════════════════════════════════════════════════════════
+
 ${sceneDescriptions}
 
-Return a JSON array with prompts for each scene in order. Each object should have "index" (number) and "prompt" (string).`;
+═══════════════════════════════════════════════════════════════
+INSTRUCTIONS:
+═══════════════════════════════════════════════════════════════
+1. Treat this as ONE continuous story told through ${scenes.length} visual chapters
+2. Scene 1 must ESTABLISH - introduce visual world and character
+3. Each scene should PROGRESS the visual narrative logically
+4. Match camera movement speed to the tempo provided
+5. Match visual intensity to the energy level provided
+6. Final scene should feel like CLOSURE
+
+Return a JSON array with {"index": number, "prompt": string} for each scene.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -203,7 +273,7 @@ Return a JSON array with prompts for each scene in order. Each object should hav
             type: "function",
             function: {
               name: "generate_scene_prompts",
-              description: "Generate safe video prompts for each scene",
+              description: "Generate narrative-driven video prompts that tell a visual story matching the music",
               parameters: {
                 type: "object",
                 properties: {
@@ -213,7 +283,7 @@ Return a JSON array with prompts for each scene in order. Each object should hav
                       type: "object",
                       properties: {
                         index: { type: "number", description: "Scene index (0-based)" },
-                        prompt: { type: "string", description: "The generated video prompt - must be safe and abstract" }
+                        prompt: { type: "string", description: "The generated video prompt - narrative, rhythm-matched, safe" }
                       },
                       required: ["index", "prompt"],
                       additionalProperties: false
@@ -259,13 +329,13 @@ Return a JSON array with prompts for each scene in order. Each object should hav
     const args = JSON.parse(toolCall.function.arguments);
     let prompts = args.prompts;
 
-    // Post-process: sanitize all generated prompts as a final safety check
+    // Post-process: sanitize all generated prompts
     prompts = prompts.map((p: { index: number; prompt: string }) => ({
       index: p.index,
       prompt: sanitizePrompt(p.prompt)
     }));
 
-    console.log("Generated and sanitized", prompts.length, "scene prompts");
+    console.log("Generated", prompts.length, "narrative-driven scene prompts");
 
     return new Response(
       JSON.stringify({ success: true, prompts }),
