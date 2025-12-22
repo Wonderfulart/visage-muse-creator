@@ -84,25 +84,59 @@ export default function LightningMode() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('audio/')) {
+    // Accept more audio types - check file extension as fallback
+    const isAudioFile = file.type.startsWith('audio/') || 
+      /\.(mp3|wav|m4a|ogg|flac|aac|wma|aiff)$/i.test(file.name);
+    
+    if (!isAudioFile) {
       toast.error("Please upload an audio file");
       return;
     }
 
+    // Show loading toast
+    const loadingToast = toast.loading("Loading audio file...");
+
     const url = URL.createObjectURL(file);
-    const audio = new Audio(url);
+    const audio = new Audio();
     
+    // Set a timeout in case metadata never loads
+    const timeout = setTimeout(() => {
+      console.warn('[Lightning] Audio metadata timeout, using file-based estimate');
+      toast.dismiss(loadingToast);
+      
+      // Estimate duration from file size (rough: ~1MB per minute for MP3)
+      const estimatedDuration = Math.max(30, Math.min(300, file.size / 16000));
+      setAudioDuration(estimatedDuration);
+      setAudioFile(file);
+      setAudioUrl(url);
+      toast.success(`Audio loaded (estimated ${Math.round(estimatedDuration)}s)`);
+    }, 5000); // 5 second timeout
+
     audio.addEventListener('loadedmetadata', () => {
+      clearTimeout(timeout);
+      toast.dismiss(loadingToast);
       setAudioDuration(audio.duration);
       setAudioFile(file);
       setAudioUrl(url);
       toast.success(`Audio loaded: ${Math.round(audio.duration)}s`);
     });
 
-    audio.addEventListener('error', () => {
-      toast.error("Failed to load audio file");
-      URL.revokeObjectURL(url);
+    audio.addEventListener('error', (e) => {
+      clearTimeout(timeout);
+      toast.dismiss(loadingToast);
+      console.error('[Lightning] Audio load error:', e);
+      
+      // Still try to use the file with estimated duration
+      const estimatedDuration = Math.max(30, Math.min(300, file.size / 16000));
+      setAudioDuration(estimatedDuration);
+      setAudioFile(file);
+      setAudioUrl(url);
+      toast.warning(`Audio loaded with estimated duration (${Math.round(estimatedDuration)}s)`);
     });
+
+    // Explicitly set src and load
+    audio.src = url;
+    audio.load(); // Force loading to start
   };
 
   // Handle photo upload - convert to base64 for API calls
