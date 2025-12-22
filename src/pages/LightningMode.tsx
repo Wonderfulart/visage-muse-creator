@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { ClipCard, LightningClip } from "@/components/LightningMode/ClipCard";
 import { SyncProgress } from "@/components/LightningMode/SyncProgress";
+import { MusicVideoJobProgress } from "@/components/MusicVideoJobProgress";
 import { AuthButton } from "@/components/AuthButton";
 import { Textarea } from "@/components/ui/textarea";
 import { analyzeAudio, getNarrativePosition, getTempoDescription, getEnergyDescription } from "@/utils/audioAnalyzer";
@@ -19,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { downloadClipsAsZip } from "@/utils/zipDownloader";
 import { stitchVideos, revokeStitchedVideo, StitchProgress } from "@/utils/videoStitcher";
 
-type Phase = 'upload' | 'analyzing' | 'prompts' | 'editing' | 'syncing' | 'complete';
+type Phase = 'upload' | 'analyzing' | 'prompts' | 'editing' | 'generating' | 'syncing' | 'complete';
 
 interface CharacterAnalysis {
   mood: string[];
@@ -59,6 +60,7 @@ export default function LightningMode() {
   
   // Generation state
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   
   // Download/Stitch state
   const [isDownloading, setIsDownloading] = useState(false);
@@ -375,8 +377,123 @@ Narrative Type: ${songAnalysis.narrativeType}
     }
   };
 
-  // Generate all pending clips
+  // Generate all pending clips using the new orchestration system
   const handleGenerateAll = async () => {
+    const pendingClips = clips.filter(c => c.status === 'pending' || c.status === 'error');
+    if (pendingClips.length === 0) {
+      toast.info("All clips already generated or in progress");
+      return;
+    }
+
+    setIsGeneratingAll(true);
+    
+    try {
+      // Step 1: Upload audio to storage
+      toast.loading("Uploading audio...");
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        toast.error("Please sign in to generate videos");
+        setIsGeneratingAll(false);
+        return;
+      }
+
+      const audioPath = `${userData.user.id}/lightning-audio-${Date.now()}.${audioFile!.name.split('.').pop()}`;
+      const { error: audioUploadError } = await supabase.storage
+        .from('background-music')
+        .upload(audioPath, audioFile!, { upsert: true });
+      
+      if (audioUploadError) throw audioUploadError;
+      
+      const { data: audioSignedData } = await supabase.storage
+        .from('background-music')
+        .createSignedUrl(audioPath, 7200); // 2 hours
+      
+      if (!audioSignedData?.signedUrl) throw new Error("Failed to get audio URL");
+
+      // Step 2: Upload character image to storage  
+      let characterImageUrl = null;
+      if (photoFile) {
+        const imagePath = `${userData.user.id}/lightning-character-${Date.now()}.${photoFile.name.split('.').pop()}`;
+        const { error: imageUploadError } = await supabase.storage
+          .from('background-music')
+          .upload(imagePath, photoFile, { upsert: true });
+        
+        if (imageUploadError) throw imageUploadError;
+        
+        const { data: imageSignedData } = await supabase.storage
+          .from('background-music')
+          .createSignedUrl(imagePath, 7200);
+        
+        characterImageUrl = imageSignedData?.signedUrl || null;
+      }
+
+      // Step 3: Create job via orchestrator
+      toast.loading("Creating job...");
+      const { data: createData, error: createError } = await supabase.functions.invoke(
+        'music-video-orchestrator',
+        { 
+          body: { 
+            action: 'create',
+            audioUrl: audioSignedData.signedUrl,
+            characterImageUrl,
+            useLipsync: !!characterImageUrl,
+            durationMs: audioDuration * 1000
+          }
+        }
+      );
+
+      if (createError) throw createError;
+      if (!createData.job_id) throw new Error("No job ID returned");
+
+      const jobId = createData.job_id;
+      console.log('[Lightning] Created job:', jobId);
+
+      // Step 4: Generate prompts for segments
+      toast.loading("Generating prompts...");
+      const { error: promptsError } = await supabase.functions.invoke(
+        'music-video-orchestrator',
+        {
+          body: {
+            action: 'generate-prompts',
+            jobId,
+            lyrics,
+            characterAnalysis
+          }
+        }
+      );
+
+      if (promptsError) throw promptsError;
+
+      // Step 5: Start video generation
+      toast.loading("Starting video generation...");
+      const { error: startError } = await supabase.functions.invoke(
+        'music-video-orchestrator',
+        {
+          body: {
+            action: 'start-generation',
+            jobId,
+            referenceImageBase64: photoBase64
+          }
+        }
+      );
+
+      if (startError) throw startError;
+
+      // Step 6: Switch to generating phase with job progress UI
+      setCurrentJobId(jobId);
+      setPhase('generating');
+      toast.success("Video generation started!");
+      
+    } catch (error) {
+      console.error("[Lightning] Orchestration error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to start generation");
+    } finally {
+      setIsGeneratingAll(false);
+    }
+  };
+
+  // Legacy: Generate all clips with old method (keeping for fallback)
+  const handleGenerateAllLegacy = async () => {
     const pendingClips = clips.filter(c => c.status === 'pending' || c.status === 'error');
     if (pendingClips.length === 0) {
       toast.info("All clips already generated or in progress");
@@ -394,6 +511,40 @@ Narrative Type: ${songAnalysis.narrativeType}
     }
 
     setIsGeneratingAll(false);
+  };
+
+  // Handle job completion from orchestrator
+  const handleJobComplete = async (videoUrls: Array<{ index: number; url: string }>, audioUrl: string) => {
+    console.log('[Lightning] Job complete with', videoUrls.length, 'video segments');
+    
+    // Stitch the videos together using the client-side stitcher
+    try {
+      toast.loading("Stitching final video...");
+      
+      // Sort by index and extract URLs
+      const sortedUrls = videoUrls
+        .sort((a, b) => a.index - b.index)
+        .map(v => v.url);
+      
+      // Use the existing stitch function
+      const result = await stitchVideos(sortedUrls, setStitchProgress);
+      setStitchedVideoUrl(result.url);
+      
+      setPhase('complete');
+      toast.success("Music video generated successfully!");
+    } catch (error) {
+      console.error('[Lightning] Stitch error:', error);
+      toast.error("Video generation completed but stitching failed");
+      setPhase('complete');
+    }
+  };
+
+  // Handle job cancel
+  const handleJobCancel = () => {
+    console.log('[Lightning] Job cancelled');
+    setCurrentJobId(null);
+    setPhase('editing');
+    toast.info("Generation cancelled");
   };
 
   // Start polling for video status
@@ -970,6 +1121,24 @@ Narrative Type: ${songAnalysis.narrativeType}
           </div>
         );
 
+      case 'generating':
+        return (
+          <div className="space-y-6">
+            {currentJobId ? (
+              <MusicVideoJobProgress
+                jobId={currentJobId}
+                onComplete={handleJobComplete}
+                onCancel={handleJobCancel}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+                <h3 className="text-xl font-semibold mb-2">Starting generation...</h3>
+              </div>
+            )}
+          </div>
+        );
+
       case 'syncing':
         return (
           <div className="space-y-6">
@@ -1117,12 +1286,12 @@ Narrative Type: ${songAnalysis.narrativeType}
       <div className="border-b border-border/30 bg-muted/30">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-center gap-2">
-            {(['upload', 'analyzing', 'prompts', 'editing', 'syncing', 'complete'] as Phase[]).map((p, i) => (
+            {(['upload', 'analyzing', 'prompts', 'editing', 'generating', 'complete'] as Phase[]).map((p, i) => (
               <div key={p} className="flex items-center">
                 <div className={cn(
                   "w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors",
                   phase === p ? "bg-primary text-primary-foreground" :
-                  (['upload', 'analyzing', 'prompts', 'editing', 'syncing', 'complete'].indexOf(phase) > i) 
+                  (['upload', 'analyzing', 'prompts', 'editing', 'generating', 'complete'].indexOf(phase) > i) 
                     ? "bg-primary/20 text-primary" 
                     : "bg-muted text-muted-foreground"
                 )}>
@@ -1131,7 +1300,7 @@ Narrative Type: ${songAnalysis.narrativeType}
                 {i < 5 && (
                   <div className={cn(
                     "w-8 h-0.5 mx-1",
-                    (['upload', 'analyzing', 'prompts', 'editing', 'syncing', 'complete'].indexOf(phase) > i)
+                    (['upload', 'analyzing', 'prompts', 'editing', 'generating', 'complete'].indexOf(phase) > i)
                       ? "bg-primary/50"
                       : "bg-border"
                   )} />

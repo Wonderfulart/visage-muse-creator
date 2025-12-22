@@ -256,23 +256,66 @@ async function handleGeneratePrompts(adminClient: any, userId: string, body: any
   }
   
   // Generate a prompt for each segment
-  // For now, use a template-based approach; could call AI later
+  const totalSegments = segments.length;
+  
   for (const segment of segments) {
     const timeLabel = `${(segment.start_ms / 1000).toFixed(1)}s - ${(segment.end_ms / 1000).toFixed(1)}s`;
+    const position = segment.segment_index / (totalSegments - 1 || 1); // 0 to 1
     
-    // Create a dynamic prompt based on segment position and any provided context
-    let prompt = `Cinematic music video scene, professional lighting, 4K quality.`;
+    // Build dynamic prompt based on segment position and character analysis
+    let promptParts: string[] = [];
     
-    if (characterAnalysis) {
-      prompt = `${characterAnalysis}. ${prompt}`;
+    // Add character context if available
+    if (characterAnalysis && typeof characterAnalysis === 'object') {
+      const ca = characterAnalysis as Record<string, unknown>;
+      if (ca.characterDescription) {
+        promptParts.push(`Character: ${ca.characterDescription}`);
+      }
+      if (ca.visualStyle) {
+        promptParts.push(`Visual style: ${ca.visualStyle}`);
+      }
+      if (ca.mood && Array.isArray(ca.mood)) {
+        promptParts.push(`Mood: ${ca.mood.join(', ')}`);
+      }
+      if (ca.colorPalette && Array.isArray(ca.colorPalette)) {
+        promptParts.push(`Color palette: ${ca.colorPalette.slice(0, 3).join(', ')}`);
+      }
+      if (ca.suggestedCameraWork) {
+        promptParts.push(`Camera: ${ca.suggestedCameraWork}`);
+      }
+      if (ca.settingSuggestions && Array.isArray(ca.settingSuggestions)) {
+        // Pick setting based on segment position
+        const settingIdx = Math.floor(position * ca.settingSuggestions.length);
+        promptParts.push(`Setting: ${ca.settingSuggestions[settingIdx]}`);
+      }
+    } else if (characterAnalysis && typeof characterAnalysis === 'string') {
+      promptParts.push(characterAnalysis);
     }
     
+    // Add narrative position
+    let narrativeDescription = '';
+    if (position < 0.2) {
+      narrativeDescription = 'Opening scene, establishing the mood, calm beginning';
+    } else if (position < 0.4) {
+      narrativeDescription = 'Building intensity, rising action, energy increasing';
+    } else if (position < 0.6) {
+      narrativeDescription = 'Peak energy, climactic moment, powerful performance';
+    } else if (position < 0.8) {
+      narrativeDescription = 'Sustained intensity, emotional peak, dramatic visuals';
+    } else {
+      narrativeDescription = 'Resolution, cooling down, reflective ending';
+    }
+    promptParts.push(`Narrative: ${narrativeDescription}`);
+    
+    // Add lyrics context if available
     if (lyrics) {
-      // Extract relevant lyrics portion based on timing (simplified)
-      prompt += ` Emotional performance matching the music.`;
+      promptParts.push('Emotional performance matching the music');
     }
     
-    prompt += ` Scene timing: ${timeLabel}.`;
+    // Add quality directives
+    promptParts.push('Cinematic music video scene, professional lighting, 4K quality, smooth motion');
+    
+    const prompt = promptParts.join('. ') + '.';
     
     await updateSegment(adminClient, segment.id, { prompt, prompt_version: 'v1' });
     console.log(`[Segment ${segment.id}] Prompt generated for ${timeLabel}`);
@@ -285,7 +328,8 @@ async function handleGeneratePrompts(adminClient: any, userId: string, body: any
 
 // ACTION: Start video generation for all segments
 async function handleStartGeneration(adminClient: any, userId: string, body: any) {
-  const { jobId, referenceImage, aspectRatio = '9:16' } = body;
+  const { jobId, referenceImage, referenceImageBase64, aspectRatio = '9:16' } = body;
+  const imageToUse = referenceImageBase64 || referenceImage;
   
   if (!jobId) throw new Error('jobId is required');
   
@@ -355,8 +399,8 @@ async function handleStartGeneration(adminClient: any, userId: string, body: any
       };
       
       // Add reference image if provided
-      if (referenceImage) {
-        const base64Match = referenceImage.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (imageToUse) {
+        const base64Match = imageToUse.match(/^data:image\/(\w+);base64,(.+)$/);
         if (base64Match) {
           (requestBody.instances as Record<string, unknown>[])[0].image = {
             bytesBase64Encoded: base64Match[2],
@@ -812,7 +856,10 @@ serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const action = url.searchParams.get('action');
+    const body = req.method === 'GET' ? {} : await req.json();
+    
+    // Support action from query params OR body
+    const action = url.searchParams.get('action') || body.action;
     
     if (!action) {
       return new Response(
@@ -821,7 +868,6 @@ serve(async (req) => {
       );
     }
 
-    const body = req.method === 'GET' ? {} : await req.json();
     const adminClient = getAdminClient();
 
     console.log(`[Orchestrator] Action: ${action}, User: ${userInfo.userId}`);

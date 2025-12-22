@@ -90,12 +90,10 @@ export function MusicVideoJobProgress({ jobId, onComplete, onCancel }: MusicVide
         }
       );
 
-      // Workaround: pass action via URL
       const { data: statusData, error: statusError } = await supabase.functions.invoke(
-        `music-video-orchestrator?action=status`,
+        'music-video-orchestrator',
         {
-          body: { jobId },
-          method: 'POST'
+          body: { action: 'status', jobId }
         }
       );
 
@@ -111,30 +109,49 @@ export function MusicVideoJobProgress({ jobId, onComplete, onCancel }: MusicVide
       for (const seg of statusData.segments || []) {
         if (seg.veo_status === 'processing' || seg.sync_status === 'processing') {
           await supabase.functions.invoke(
-            `music-video-orchestrator?action=poll-segment`,
+            'music-video-orchestrator',
             {
-              body: { segmentId: seg.id },
-              method: 'POST'
+              body: { action: 'poll-segment', segmentId: seg.id }
             }
           );
         }
       }
 
-      // Check if job is complete
-      if (statusData.job.status === 'completed') {
+      // Check if all segments are ready (not using job.status === 'completed' as that's set after stitching)
+      const allSegmentsReady = statusData.segments?.length > 0 && 
+        statusData.segments.every((s: Segment) => s.final_video_url);
+      
+      if (allSegmentsReady && statusData.job.status !== 'completed') {
         setIsPolling(false);
         
-        // Get final video URLs
-        const { data: stitchData } = await supabase.functions.invoke(
-          `music-video-orchestrator?action=stitch`,
+        // Get final video URLs from stitch endpoint
+        const { data: stitchData, error: stitchError } = await supabase.functions.invoke(
+          `music-video-orchestrator`,
           {
-            body: { jobId },
-            method: 'POST'
+            body: { action: 'stitch', jobId }
           }
         );
 
+        if (stitchError) {
+          console.error('Stitch error:', stitchError);
+          toast.error('Failed to prepare final video');
+          return;
+        }
+
         if (stitchData?.videoUrls) {
           onComplete(stitchData.videoUrls, stitchData.audioUrl);
+        }
+      } else if (statusData.job.status === 'completed') {
+        // Job was already stitched
+        setIsPolling(false);
+        
+        // Get the video URLs directly from segments
+        const videoUrls = statusData.segments
+          ?.filter((s: Segment) => s.final_video_url)
+          .map((s: Segment) => ({ index: s.segment_index, url: s.final_video_url! })) || [];
+        
+        if (videoUrls.length > 0) {
+          onComplete(videoUrls, statusData.job.audio_url);
         }
       } else if (statusData.job.status === 'failed' || statusData.job.status === 'cancelled') {
         setIsPolling(false);
@@ -162,10 +179,9 @@ export function MusicVideoJobProgress({ jobId, onComplete, onCancel }: MusicVide
     
     try {
       const { error } = await supabase.functions.invoke(
-        `music-video-orchestrator?action=retry-segment`,
+        'music-video-orchestrator',
         {
-          body: { segmentId },
-          method: 'POST'
+          body: { action: 'retry-segment', segmentId }
         }
       );
 
@@ -189,10 +205,9 @@ export function MusicVideoJobProgress({ jobId, onComplete, onCancel }: MusicVide
     
     try {
       const { error } = await supabase.functions.invoke(
-        `music-video-orchestrator?action=cancel`,
+        'music-video-orchestrator',
         {
-          body: { jobId },
-          method: 'POST'
+          body: { action: 'cancel', jobId }
         }
       );
 
