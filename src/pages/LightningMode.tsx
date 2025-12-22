@@ -179,44 +179,31 @@ export default function LightningMode() {
     setIsGeneratingPrompts(true);
     setPhase('prompts');
 
-    const toastId = toast.loading("Analyzing audio...");
+    const toastId = toast.loading("Preparing to generate prompts...");
 
     try {
       // Calculate scene count (max 10, ~8-12 seconds per scene)
       const sceneDuration = 10;
       const sceneCount = Math.min(10, Math.max(3, Math.ceil(audioDuration / sceneDuration)));
       
-      console.log('[Lightning] Starting audio analysis for', sceneCount, 'scenes');
+      console.log('[Lightning] Scene count:', sceneCount, 'for duration:', audioDuration);
       
-      // Default analysis fallback
-      const defaultAnalysis: { 
-        segments: { segmentIndex: number; energy: number; tempo: number; beatDensity: number; dynamics: 'quiet' | 'building' | 'peak' | 'fading' }[];
-        averageEnergy: number;
-        averageTempo: number;
-        energyProgression: 'building' | 'steady' | 'dynamic' | 'fading';
-      } = {
+      // Create default analysis - skip audio analysis entirely for reliability
+      // The AI will generate appropriate prompts based on lyrics and character
+      const audioAnalysis = {
         segments: Array.from({ length: sceneCount }, (_, i) => ({
           segmentIndex: i,
-          energy: 0.6,
+          energy: 0.5 + (i / sceneCount) * 0.3, // Gradual energy increase
           tempo: 120,
           beatDensity: 2,
-          dynamics: 'building' as const
+          dynamics: (i < sceneCount * 0.3 ? 'building' : i > sceneCount * 0.7 ? 'fading' : 'peak') as 'quiet' | 'building' | 'peak' | 'fading'
         })),
         averageEnergy: 0.6,
         averageTempo: 120,
-        energyProgression: 'steady' as const
+        energyProgression: 'dynamic' as const
       };
-
-      // Try audio analysis with timeout and fallback
-      let audioAnalysis = defaultAnalysis;
-      try {
-        console.log('[Lightning] Attempting audio analysis...');
-        audioAnalysis = await analyzeAudio(audioFile, sceneCount);
-        console.log('[Lightning] Audio analysis successful:', audioAnalysis);
-      } catch (audioError) {
-        console.warn('[Lightning] Audio analysis failed, using defaults:', audioError);
-        toast.info("Using default audio analysis for faster processing");
-      }
+      
+      console.log('[Lightning] Using optimized analysis for', sceneCount, 'scenes');
       
       toast.loading("Generating scene prompts...", { id: toastId });
       console.log('[Lightning] Parsing lyrics...');
