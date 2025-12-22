@@ -375,7 +375,7 @@ Return a JSON array with {"index": number, "prompt": string} for each scene.`;
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Scene prompt generation error:", errorMessage);
     return new Response(
-      JSON.stringify({ success: false, error: errorMessage }),
+      JSON.stringify({ success: false, error: "Scene prompt generation failed. Please try again." }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
