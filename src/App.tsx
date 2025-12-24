@@ -20,6 +20,7 @@ import NotFound from "./pages/NotFound";
 import SimpleMusicVideo from "./pages/SimpleMusicVideo";
 import LightningMode from "./pages/LightningMode";
 import Guide from "./pages/Guide";
+import SetupConfig from "./pages/SetupConfig";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
               <Route path="/simple/history" element={<ProtectedRoute><SimpleMusicVideoHistory /></ProtectedRoute>} />
               <Route path="/lightning" element={<ProtectedRoute><LightningMode /></ProtectedRoute>} />
               <Route path="/guide" element={<Guide />} />
+              <Route path="/setup-config" element={<SetupConfig />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
